@@ -1,0 +1,10 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+
+[rpc_endpoint]
+hl_mainnet = "https://rpc.hyperliquid.xyz/evm"
+hl_testnet = "https://rpc.hyperliquid-testnet.xyz/evm"
