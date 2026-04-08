@@ -2,15 +2,17 @@
 pragma solidity ^0.8.13;
 
 import {IERC20Metadata} from "openzeppelin/token/ERC20/extensions/IERC20Metadata.sol";
+import {SafeERC20} from "openzeppelin/token/ERC20/utils/SafeERC20.sol";
 import "openzeppelin/access/Ownable2Step.sol";
 
 // 1 VS 1 Match creator
 // Hyperliquid version
 // USDC at evm -> decimals ?
-// oracle px decimals
+// spot px decimals
 // use USDC as buy in token
 // initial virtual usd for every user
 contract HyperDuel is Ownable2Step {
+    using SafeERC20 for IERC20Metadata;
     enum MatchStatus {
         TO_START,
         ONGOING,
@@ -25,13 +27,15 @@ contract HyperDuel is Ownable2Step {
         uint256 buyIn;
         uint256 duration;
         uint256 endTime;
-        uint32[] tokensAllowed;
         MatchStatus status;
+        uint32[] tokensAllowed;
     }
 
     // Constant
-    address constant ORACLE_PX_PRECOMPILE_ADDRESS = 0x0000000000000000000000000000000000000807;
-    uint256 constant INITIAL_VIRTUAL_USD = 100_000e18;
+    address constant SPOT_PX_PRECOMPILE_ADDRESS = 0x0000000000000000000000000000000000000808;
+    // every token has 8 decimals
+    uint256 constant INITIAL_VIRTUAL_USD = 100_000e8;
+    uint256 constant GAME_TRADER_FEE = 30; // 0.3%
     uint256 constant BASE_FEE = 10_000;
 
     // match parameters
@@ -49,8 +53,10 @@ contract HyperDuel is Ownable2Step {
     // match Id => match info
     mapping(uint256 => MatchInfo) public matches;
 
-    // hyperliquid spot tokens id => enabled/disabled
-    mapping(uint32 => bool) public tradingTokens;
+    // hyperliquid spot tokens id => decimals
+    mapping(uint32 => uint8) public tradingTokens;
+    // spot tokens spotPx decimals
+    mapping(uint256 => mapping(uint32 => bool)) public matchTradingTokens;
 
     // player => matchId => token => balance
     mapping(address => mapping(uint256 => mapping(uint256 => uint256))) public matchBalances;
@@ -62,12 +68,16 @@ contract HyperDuel is Ownable2Step {
     error NotAuthorized();
     error NotOngoingMatch();
     error OnlyPlayer();
+    error SamePlayer();
     error SameToken();
+    error TokenAlreadyEnabled();
     error TokenNotEnabled();
     error WrongBuyIn();
     error WrongDuration();
     error WrongId();
     error ZeroAddress();
+    error ZeroAmount();
+    error ZeroToken();
 
     event MatchCreated(uint256 buyIn, uint256 duration, uint256 matchId);
 
@@ -79,6 +89,7 @@ contract HyperDuel is Ownable2Step {
 
     constructor(address buyInToken_, uint256 platformFee_, address feeRecipient_) Ownable(msg.sender) {
         if (buyInToken_ == address(0)) revert ZeroAddress();
+        if (feeRecipient_ == address(0)) revert ZeroAddress();
         if (platformFee_ > BASE_FEE) revert FeeTooHigh();
 
         buyInToken = IERC20Metadata(buyInToken_);
@@ -89,51 +100,52 @@ contract HyperDuel is Ownable2Step {
         maxBuyIn = 1000 * (10 ** buyInToken.decimals());
     }
 
-    /// @notice Create a match deciding the tokens allowed, duration and buyIn amount 
-    /// @param tokenAllowed Tokens allowed to be traded
+    /// @notice Create a match deciding the tokens allowed, duration and buyIn amount
+    /// @param tokensAllowed Tokens allowed to be traded during the match
     /// @param buyIn Buy in amount required to join the match
     /// @param duration Match duration
-    function createMatch(uint32[] calldata tokenAllowed, uint256 buyIn, uint256 duration) external {
-        _createMatch(address(0), address(0), tokenAllowed, buyIn, duration);
+    function createMatch(uint32[] memory tokensAllowed, uint256 buyIn, uint256 duration) external {
+        _createMatch(address(0), address(0), tokensAllowed, buyIn, duration);
     }
 
     /// @notice Create and join a match
-    /// @param tokensAllowed Tokens allowed to be traded
+    /// @param tokensAllowed Tokens allowed to be traded during the match
     /// @param buyIn Buy in amount required to join the match
     /// @param duration Match duration
-    function createMatchAndJoin(uint32[] calldata tokensAllowed, uint256 buyIn, uint256 duration) external {
+    function createMatchAndJoin(uint32[] memory tokensAllowed, uint256 buyIn, uint256 duration) external {
         _createMatch(msg.sender, address(0), tokensAllowed, buyIn, duration);
         // transfer buy in for player A
-        buyInToken.transferFrom(msg.sender, address(this), buyIn);
+        buyInToken.safeTransferFrom(msg.sender, address(this), buyIn);
     }
 
     /// @notice Ask for a match (reserved one)
     /// @param playerToAsk Player to ask for a match (only this player can join it)
-    /// @param tokensAllowed Tokens allowed to be traded
+    /// @param tokensAllowed Tokens allowed to be traded during the match
     /// @param buyIn Buy in amount required to join the match
-    /// @param duration Match duration 
-    function askForMatch(address playerToAsk, uint32[] calldata tokensAllowed, uint256 buyIn, uint256 duration)
-        external
-    {
+    /// @param duration Match duration
+    function askForMatch(address playerToAsk, uint32[] memory tokensAllowed, uint256 buyIn, uint256 duration) external {
+        if (msg.sender == playerToAsk) revert SamePlayer();
         _createMatch(msg.sender, playerToAsk, tokensAllowed, buyIn, duration);
         // transfer buy in for player A
-        buyInToken.transferFrom(msg.sender, address(this), buyIn);
+        buyInToken.safeTransferFrom(msg.sender, address(this), buyIn);
     }
 
     /// @notice Join a match
     /// @param _matchId Match id to join
     function joinMatch(uint256 _matchId) external onlyExistingMatch(_matchId) {
-        MatchInfo memory matchInfo = matches[_matchId];
+        MatchInfo storage matchInfo = matches[_matchId];
         // check if match is ongoing
         if (matchInfo.status != MatchStatus.TO_START) revert OngoingMatch();
 
         bool matchStarted;
         if (matchInfo.playerA == address(0)) {
             // first player to subscribe
-            matches[_matchId].playerA = msg.sender;
+            matchInfo.playerA = msg.sender;
         } else if (matchInfo.playerB == address(0)) {
+            // check if it isn't player A
+            if (msg.sender == matchInfo.playerA) revert SamePlayer();
             // second player to subscribe
-            matches[_matchId].playerB = msg.sender;
+            matchInfo.playerB = msg.sender;
             // start match
             matchStarted = true;
         } else {
@@ -143,14 +155,16 @@ contract HyperDuel is Ownable2Step {
             matchStarted = true;
         }
 
-        buyInToken.transferFrom(msg.sender, address(this), matchInfo.buyIn);
+        buyInToken.safeTransferFrom(msg.sender, address(this), matchInfo.buyIn);
 
         if (matchStarted) {
-            matches[_matchId].endTime = block.timestamp + matchInfo.duration;
-            matches[_matchId].status = MatchStatus.ONGOING;
+            matchInfo.endTime = block.timestamp + matchInfo.duration;
+            matchInfo.status = MatchStatus.ONGOING;
             // add init virtual usd
-            matchBalances[matchInfo.playerA][matchId][0] = INITIAL_VIRTUAL_USD;
-            matchBalances[matchInfo.playerB][matchId][0] = INITIAL_VIRTUAL_USD;
+            matchBalances[matchInfo.playerA][_matchId][0] = INITIAL_VIRTUAL_USD;
+            matchBalances[matchInfo.playerB][_matchId][0] = INITIAL_VIRTUAL_USD;
+
+            emit MatchStarted(matchInfo.playerA, matchInfo.playerB, matchInfo.endTime, _matchId);
         }
     }
 
@@ -163,7 +177,7 @@ contract HyperDuel is Ownable2Step {
         if (matchInfo.status != MatchStatus.TO_START) revert OngoingMatch();
 
         // transfer back token to player A
-        buyInToken.transfer(msg.sender, matchInfo.buyIn);
+        buyInToken.safeTransfer(msg.sender, matchInfo.buyIn);
 
         matches[_matchId].status = MatchStatus.REMOVED;
 
@@ -186,6 +200,8 @@ contract HyperDuel is Ownable2Step {
         if (matchInfo.playerA != msg.sender && matchInfo.playerB != msg.sender) revert OnlyPlayer();
         // check if the match is ongoing
         if (matchInfo.status != MatchStatus.ONGOING) revert NotOngoingMatch();
+        // check if the match has to conclude
+        if (block.timestamp >= matchInfo.endTime) revert NotOngoingMatch();
 
         uint256 length = tokensIn.length;
         if (length != tokensOut.length) revert DifferentLength();
@@ -194,15 +210,15 @@ contract HyperDuel is Ownable2Step {
         uint32 tokenIn;
         uint32 tokenOut;
         uint256 amountIn;
-        uint256 amountOut;
         for (uint256 i; i < length;) {
             // check if the tokens id are valid
             tokenIn = tokensIn[i];
             tokenOut = tokensOut[i];
             amountIn = amountsIn[i];
+            if (amountIn == 0) revert ZeroAmount();
             if (tokenIn == tokenOut) revert SameToken();
-            if (!tradingTokens[tokenIn]) revert TokenNotEnabled();
-            if (!tradingTokens[tokenOut]) revert TokenNotEnabled();
+            if (tokenIn != 0 && !matchTradingTokens[_matchId][tokenIn]) revert TokenNotEnabled();
+            if (tokenOut != 0 && !matchTradingTokens[_matchId][tokenOut]) revert TokenNotEnabled();
 
             _swap(_matchId, tokenIn, tokenOut, amountIn);
             unchecked {
@@ -213,7 +229,7 @@ contract HyperDuel is Ownable2Step {
 
     /// @notice Internal function to virtual swap
     /// @param _matchId Match id
-    /// @param _tokenIn Tokens to swap for 
+    /// @param _tokenIn Tokens to swap for
     /// @param _tokenOut Tokens to obtain
     /// @param _amountIn Swap amount
     function _swap(uint256 _matchId, uint32 _tokenIn, uint32 _tokenOut, uint256 _amountIn) internal {
@@ -222,21 +238,16 @@ contract HyperDuel is Ownable2Step {
         matchBalances[msg.sender][_matchId][_tokenIn] -= _amountIn;
         // calculate usd value of token in via hyperliquid spot px
         // obtain usd value of token in
-        uint256 usdIn;
-        if (_tokenIn == 0) {
-            // swap from virtual usd
-            usdIn = _amountIn;
-        } else {
-            usdIn = _amountIn * uint256(oraclePx(_tokenIn));
+        uint256 usdIn = _amountIn;
+        if (_tokenIn != 0) {
+            usdIn = usdIn * uint256(spotPx(_tokenIn)) / (10 ** tradingTokens[_tokenIn]);
         }
 
-        uint256 amountOut;
-        if (_tokenOut == 0) {
-            // swap to virtual usd
-            amountOut = usdIn;
-        } else {
-            amountOut = usdIn / uint256(oraclePx(_tokenOut));
+        uint256 amountOut = usdIn - (usdIn * GAME_TRADER_FEE / BASE_FEE);
+        if (_tokenOut != 0) {
+            amountOut = amountOut * (10 ** tradingTokens[_tokenOut]) / uint256(spotPx(_tokenOut));
         }
+
         matchBalances[msg.sender][_matchId][_tokenOut] += amountOut;
     }
 
@@ -266,53 +277,60 @@ contract HyperDuel is Ownable2Step {
         // tie match
         if (winner == address(0)) {
             // resend back buy in to players, no fee on tie
-            buyInToken.transfer(playerA, buyIn);
-            buyInToken.transfer(playerB, buyIn);
+            buyInToken.safeTransfer(playerA, buyIn);
+            buyInToken.safeTransfer(playerB, buyIn);
         } else {
+            matches[_matchId].winner = winner;
+
             // calculate prize
             prize = buyIn * 2;
             uint256 fee = prize * platformFee / BASE_FEE;
             // transfer prize to the winner
-            buyInToken.transfer(winner, prize - fee);
+            buyInToken.safeTransfer(winner, prize - fee);
             // transfer platform fee to the dao
-            buyInToken.transfer(feeRecipient, fee);
+            buyInToken.safeTransfer(feeRecipient, fee);
         }
 
-        // mark the match as finished
+        // mark the match as finished before transfer
         matches[_matchId].status = MatchStatus.FINISHED;
 
-        emit MatchConcluded(winner, prize, matchId);
+        emit MatchConcluded(winner, prize, _matchId);
     }
 
     /// @notice Create a match
     /// @param player1 Player1 address
     /// @param player2 Player2 address
-    /// @param tokensAllowed Tokens allowed to be traded
+    /// @param tokensAllowed Tokens allowed to be traded during the match
     /// @param buyIn Buy in amount
     /// @param duration Match duration
     function _createMatch(
         address player1,
         address player2,
-        uint32[] calldata tokensAllowed,
+        uint32[] memory tokensAllowed,
         uint256 buyIn,
         uint256 duration
     ) internal {
+        if (tokensAllowed.length == 0) revert ZeroToken();
         if (buyIn == 0 || buyIn > maxBuyIn || buyIn < minBuyIn) revert WrongBuyIn();
         if (duration == 0 || duration > maxDuration || duration < minDuration) revert WrongDuration();
         // check if all tokens are enabled to trade
         // permit duplicate
+        uint256 nextMatchId = ++matchId;
         uint256 length = tokensAllowed.length;
-        for (uint256 i; i < length;) {
+        for (uint32 i; i < length;) {
+            uint32 tokenAllowed = tokensAllowed[i];
             // 0 is virtual usd
-            if (tokensAllowed[i] == 0 || !tradingTokens[tokensAllowed[i]]) revert TokenNotEnabled();
+            if (tokensAllowed[i] == 0 || tradingTokens[tokenAllowed] == 0) revert TokenNotEnabled();
+            if (matchTradingTokens[nextMatchId][tokenAllowed]) revert TokenAlreadyEnabled();
+            matchTradingTokens[nextMatchId][tokenAllowed] = true;
             unchecked {
                 ++i;
             }
         }
-        matches[++matchId] =
-            MatchInfo(player1, player2, address(0), buyIn, duration, 0, tokensAllowed, MatchStatus.TO_START);
+        matches[nextMatchId] =
+            MatchInfo(player1, player2, address(0), buyIn, duration, 0, MatchStatus.TO_START, tokensAllowed);
 
-        emit MatchCreated(buyIn, duration, matchId);
+        emit MatchCreated(buyIn, duration, nextMatchId);
     }
 
     /// @notice Calculate the total usd portfolio value
@@ -328,7 +346,7 @@ contract HyperDuel is Ownable2Step {
             uint32 token = tokensAllowed[i];
             uint256 balance = matchBalances[_player][_matchId][token];
             if (balance != 0) {
-                uint256 usdValue = balance * uint256(oraclePx(token));
+                uint256 usdValue = balance * uint256(spotPx(token)) / (10 ** tradingTokens[token]);
                 totalUsd += usdValue;
             }
             unchecked {
@@ -339,27 +357,33 @@ contract HyperDuel is Ownable2Step {
         totalUsd += matchBalances[_player][_matchId][0];
     }
 
-    /// @notice Get the oracle price for the spot asset in hyperliquid
+    /// @notice Get the spot price for the spot asset in hyperliquid
     /// @param index Spot token index
-    function oraclePx(uint32 index) public view returns (uint64) {
+    function spotPx(uint32 index) public view returns (uint64) {
         bool success;
         bytes memory result;
-        (success, result) = ORACLE_PX_PRECOMPILE_ADDRESS.staticcall(abi.encode(index));
-        require(success, "OraclePx precompile call failed");
+        (success, result) = SPOT_PX_PRECOMPILE_ADDRESS.staticcall(abi.encode(index));
+        require(success, "SpotPx precompile call failed");
         return abi.decode(result, (uint64));
+    }
+
+    /// @notice Get the match tokens allowed list
+    /// @param _matchId Match id
+    function getMatchTokensAllowed(uint256 _matchId) external view returns (uint32[] memory _tokensAllowed) {
+        _tokensAllowed = matches[_matchId].tokensAllowed;
     }
 
     /// @notice Enable/Disable trading tokens
     /// @param _tokenId Hyperliquid spot token index
-    /// @param _status Enable or disable it
-    function toggleTradingToken(uint32 _tokenId, bool _status) external onlyOwner {
-        tradingTokens[_tokenId] = _status;
+    /// @param _spotPxDecimals SpotPx decimals (0 to disable the token)
+    function toggleTradingToken(uint32 _tokenId, uint8 _spotPxDecimals) external onlyOwner {
+        tradingTokens[_tokenId] = _spotPxDecimals;
     }
 
     /// @notice Set platform fees
     /// @param _platformFee Platform fees
     function setPlatformFee(uint256 _platformFee) external onlyOwner {
-        if (_platformFee < BASE_FEE) revert FeeTooHigh();
+        if (_platformFee > BASE_FEE) revert FeeTooHigh();
         platformFee = _platformFee;
     }
 
@@ -393,7 +417,7 @@ contract HyperDuel is Ownable2Step {
 
     modifier onlyExistingMatch(uint256 _matchId) {
         // check if match id exist
-        if (_matchId > matchId) revert WrongId();
+        if (_matchId == 0 || _matchId > matchId) revert WrongId();
         _;
     }
 }
