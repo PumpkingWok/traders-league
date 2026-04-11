@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.25;
 
 import {IERC20Metadata} from "openzeppelin/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "openzeppelin/token/ERC20/utils/SafeERC20.sol";
@@ -75,6 +75,7 @@ contract HyperDuel is Ownable2Step {
     error WrongBuyIn();
     error WrongDuration();
     error WrongId();
+    error WrongPlayerA();
     error ZeroAddress();
     error ZeroAmount();
     error ZeroToken();
@@ -101,33 +102,61 @@ contract HyperDuel is Ownable2Step {
     }
 
     /// @notice Create a match deciding the tokens allowed, duration and buyIn amount
+    /// @param playerA Player A (it can be msg.sender or no player)
+    /// @param playerB Player B (setting it will reserve the match only for this address)
     /// @param tokensAllowed Tokens allowed to be traded during the match
     /// @param buyIn Buy in amount required to join the match
     /// @param duration Match duration
-    function createMatch(uint32[] memory tokensAllowed, uint256 buyIn, uint256 duration) external {
-        _createMatch(address(0), address(0), tokensAllowed, buyIn, duration);
+    function createMatch(
+        address playerA,
+        address playerB,
+        uint32[] memory tokensAllowed,
+        uint256 buyIn,
+        uint256 duration
+    ) external {
+        if (playerA != address(0)) {
+            if (playerA != msg.sender) revert WrongPlayerA();
+            // transfer buy in for player A
+            buyInToken.safeTransferFrom(msg.sender, address(this), buyIn);
+        }
+        if (playerB != address(0) && playerB == msg.sender) revert SamePlayer();
+        _createMatch(playerA, playerB, tokensAllowed, buyIn, duration);
     }
 
-    /// @notice Create and join a match
+    /// @notice Create a match
+    /// @param player1 Player1 address
+    /// @param player2 Player2 address
     /// @param tokensAllowed Tokens allowed to be traded during the match
-    /// @param buyIn Buy in amount required to join the match
+    /// @param buyIn Buy in amount
     /// @param duration Match duration
-    function createMatchAndJoin(uint32[] memory tokensAllowed, uint256 buyIn, uint256 duration) external {
-        _createMatch(msg.sender, address(0), tokensAllowed, buyIn, duration);
-        // transfer buy in for player A
-        buyInToken.safeTransferFrom(msg.sender, address(this), buyIn);
-    }
+    function _createMatch(
+        address player1,
+        address player2,
+        uint32[] memory tokensAllowed,
+        uint256 buyIn,
+        uint256 duration
+    ) internal {
+        if (tokensAllowed.length == 0) revert ZeroToken();
+        if (buyIn == 0 || buyIn > maxBuyIn || buyIn < minBuyIn) revert WrongBuyIn();
+        if (duration == 0 || duration > maxDuration || duration < minDuration) revert WrongDuration();
+        // check if all tokens are enabled to trade
+        // permit duplicate
+        uint256 nextMatchId = ++matchId;
+        uint256 length = tokensAllowed.length;
+        for (uint32 i; i < length;) {
+            uint32 tokenAllowed = tokensAllowed[i];
+            // 0 is virtual usd
+            if (tokensAllowed[i] == 0 || tradingTokens[tokenAllowed] == 0) revert TokenNotEnabled();
+            if (matchTradingTokens[nextMatchId][tokenAllowed]) revert TokenAlreadyEnabled();
+            matchTradingTokens[nextMatchId][tokenAllowed] = true;
+            unchecked {
+                ++i;
+            }
+        }
+        matches[nextMatchId] =
+            MatchInfo(player1, player2, address(0), buyIn, duration, 0, MatchStatus.TO_START, tokensAllowed);
 
-    /// @notice Ask for a match (reserved one)
-    /// @param playerToAsk Player to ask for a match (only this player can join it)
-    /// @param tokensAllowed Tokens allowed to be traded during the match
-    /// @param buyIn Buy in amount required to join the match
-    /// @param duration Match duration
-    function askForMatch(address playerToAsk, uint32[] memory tokensAllowed, uint256 buyIn, uint256 duration) external {
-        if (msg.sender == playerToAsk) revert SamePlayer();
-        _createMatch(msg.sender, playerToAsk, tokensAllowed, buyIn, duration);
-        // transfer buy in for player A
-        buyInToken.safeTransferFrom(msg.sender, address(this), buyIn);
+        emit MatchCreated(buyIn, duration, nextMatchId);
     }
 
     /// @notice Join a match
@@ -295,42 +324,6 @@ contract HyperDuel is Ownable2Step {
         matches[_matchId].status = MatchStatus.FINISHED;
 
         emit MatchConcluded(winner, prize, _matchId);
-    }
-
-    /// @notice Create a match
-    /// @param player1 Player1 address
-    /// @param player2 Player2 address
-    /// @param tokensAllowed Tokens allowed to be traded during the match
-    /// @param buyIn Buy in amount
-    /// @param duration Match duration
-    function _createMatch(
-        address player1,
-        address player2,
-        uint32[] memory tokensAllowed,
-        uint256 buyIn,
-        uint256 duration
-    ) internal {
-        if (tokensAllowed.length == 0) revert ZeroToken();
-        if (buyIn == 0 || buyIn > maxBuyIn || buyIn < minBuyIn) revert WrongBuyIn();
-        if (duration == 0 || duration > maxDuration || duration < minDuration) revert WrongDuration();
-        // check if all tokens are enabled to trade
-        // permit duplicate
-        uint256 nextMatchId = ++matchId;
-        uint256 length = tokensAllowed.length;
-        for (uint32 i; i < length;) {
-            uint32 tokenAllowed = tokensAllowed[i];
-            // 0 is virtual usd
-            if (tokensAllowed[i] == 0 || tradingTokens[tokenAllowed] == 0) revert TokenNotEnabled();
-            if (matchTradingTokens[nextMatchId][tokenAllowed]) revert TokenAlreadyEnabled();
-            matchTradingTokens[nextMatchId][tokenAllowed] = true;
-            unchecked {
-                ++i;
-            }
-        }
-        matches[nextMatchId] =
-            MatchInfo(player1, player2, address(0), buyIn, duration, 0, MatchStatus.TO_START, tokensAllowed);
-
-        emit MatchCreated(buyIn, duration, nextMatchId);
     }
 
     /// @notice Calculate the total usd portfolio value
