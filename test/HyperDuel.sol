@@ -74,7 +74,7 @@ contract HyperDuelTest is Test {
         _checkMatchInfo(1, playerA, playerB, address(0), buyIn, duration, 0);
     }
 
-    function test_removeMatch() external {
+    function test_unjoinMatch() external {
         (uint256 buyIn, uint256 duration, uint32[] memory tokensAllowed) = _getDefaultMatchData();
 
         uint256 initBalance = IERC20(buyInToken).balanceOf(playerA);
@@ -83,10 +83,12 @@ contract HyperDuelTest is Test {
         duel.createMatch(playerA, address(0), tokensAllowed, buyIn, duration);
 
         // remove match
-        duel.removeMatch(1);
+        duel.unjoinMatch(1);
         vm.stopPrank();
         uint256 finalBalance = IERC20(buyInToken).balanceOf(playerA);
         assertEq(initBalance, finalBalance);
+
+        _checkMatchInfo(1, address(0), address(0), address(0), buyIn, duration, 0);
     }
 
     function _getDefaultMatchData()
