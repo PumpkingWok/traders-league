@@ -27,8 +27,8 @@ abstract contract Duel is Ownable2Step {
     }
 
     // Constant
-    // every token has 8 decimals
-    uint256 constant INITIAL_VIRTUAL_USD = 100_000e8;
+    // every token has 18 decimals
+    uint256 constant INITIAL_VIRTUAL_USD = 100_000e18;
     uint256 constant GAME_TRADER_FEE = 30; // 0.3%
     uint256 constant BASE_FEE = 10_000;
 

@@ -16,8 +16,10 @@ import {Duel} from "./Duel.sol";
 contract HyperDuel is Duel {
     // Constant
     address constant SPOT_PX_PRECOMPILE_ADDRESS = 0x0000000000000000000000000000000000000808;
-   
-    constructor(address buyInToken_, uint256 platformFee_, address feeRecipient_) Duel(buyInToken_, platformFee_, feeRecipient_) {}
+
+    constructor(address buyInToken_, uint256 platformFee_, address feeRecipient_)
+        Duel(buyInToken_, platformFee_, feeRecipient_)
+    {}
 
     /// @notice Get the token price for the spot asset in hyperliquid
     /// @param index Spot token index
