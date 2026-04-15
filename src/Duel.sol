@@ -28,10 +28,10 @@ abstract contract Duel is Ownable2Step {
 
     // Constant
     // every virtual token has 18 decimals
-    uint256 constant INITIAL_VIRTUAL_USD = 100_000e18;
-    uint256 constant GAME_TRADER_FEE = 30; // 0.3%
-    uint256 constant BASE_FEE = 10_000;
-    uint256 constant MAX_PLATFORM_FEE = 500; // 5%
+    uint256 public constant INITIAL_VIRTUAL_USD = 100_000e18;
+    uint256 public constant GAME_TRADER_FEE = 30; // 0.3%
+    uint256 public constant BASE_FEE = 10_000;
+    uint256 public constant MAX_PLATFORM_FEE = 500; // 5%
 
     // match parameters
     IERC20Metadata public immutable buyInToken;
