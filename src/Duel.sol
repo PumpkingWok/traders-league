@@ -27,10 +27,11 @@ abstract contract Duel is Ownable2Step {
     }
 
     // Constant
-    // every token has 18 decimals
+    // every virtual token has 18 decimals
     uint256 constant INITIAL_VIRTUAL_USD = 100_000e18;
     uint256 constant GAME_TRADER_FEE = 30; // 0.3%
     uint256 constant BASE_FEE = 10_000;
+    uint256 constant MAX_PLATFORM_FEE = 500; // 5%
 
     // match parameters
     IERC20Metadata public immutable buyInToken;
@@ -39,8 +40,8 @@ abstract contract Duel is Ownable2Step {
     uint256 public minDuration = 1 hours;
     uint256 public maxDuration = 1 weeks;
 
-    uint256 public platformFee;
-    address public feeRecipient;
+    uint256 public platformFeePercentage;
+    uint256 public accruedPlatformFee;
 
     uint256 public matchId;
 
@@ -66,7 +67,6 @@ abstract contract Duel is Ownable2Step {
     error NotAuthorized();
     error NotOngoingMatch();
     error OnlyPlayer();
-    error PriceCallFailed();
     error SamePlayer();
     error SameToken();
     error TokenAlreadyEnabled();
@@ -98,76 +98,74 @@ abstract contract Duel is Ownable2Step {
         uint256 matchId
     );
 
-    constructor(address buyInToken_, uint256 platformFee_, address feeRecipient_) Ownable(msg.sender) {
+    constructor(address buyInToken_, uint256 platformFeePercentage_) Ownable(msg.sender) {
         if (buyInToken_ == address(0)) revert ZeroAddress();
-        if (feeRecipient_ == address(0)) revert ZeroAddress();
-        if (platformFee_ > BASE_FEE) revert FeeTooHigh();
+        if (platformFeePercentage_ > MAX_PLATFORM_FEE) revert FeeTooHigh();
 
         buyInToken = IERC20Metadata(buyInToken_);
-        platformFee = platformFee_;
-        feeRecipient = feeRecipient_;
+        platformFeePercentage = platformFeePercentage_;
 
         minBuyIn = 10 * (10 ** buyInToken.decimals());
         maxBuyIn = 1000 * (10 ** buyInToken.decimals());
     }
 
     /// @notice Create a match deciding the tokens allowed, duration and buyIn amount
-    /// @param playerA Player A (it can be msg.sender or no player)
-    /// @param playerB Player B (setting it will reserve the match only for this address)
-    /// @param tokensAllowed Tokens allowed to be traded during the match
-    /// @param buyIn Buy in amount required to join the match
-    /// @param duration Match duration
+    /// @param _playerA Player A (it can be msg.sender or no player)
+    /// @param _playerB Player B (setting it will reserve the match only for this address)
+    /// @param _tokensAllowed Tokens allowed to be traded during the match
+    /// @param _buyIn Buy in amount required to join the match
+    /// @param _duration Match duration
     function createMatch(
-        address playerA,
-        address playerB,
-        uint32[] memory tokensAllowed,
-        uint256 buyIn,
-        uint256 duration
+        address _playerA,
+        address _playerB,
+        uint32[] memory _tokensAllowed,
+        uint256 _buyIn,
+        uint256 _duration
     ) external {
-        if (playerA != address(0)) {
-            if (playerA != msg.sender) revert WrongPlayerA();
+        if (_playerA != address(0)) {
+            if (_playerA != msg.sender) revert WrongPlayerA();
             // transfer buy in for player A
-            buyInToken.safeTransferFrom(msg.sender, address(this), buyIn);
+            buyInToken.safeTransferFrom(msg.sender, address(this), _buyIn);
         }
-        if (playerB != address(0) && playerB == msg.sender) revert SamePlayer();
-        _createMatch(playerA, playerB, tokensAllowed, buyIn, duration);
+        if (_playerB != address(0) && _playerB == msg.sender) revert SamePlayer();
+        _createMatch(_playerA, _playerB, _tokensAllowed, _buyIn, _duration);
     }
 
     /// @notice Create a match
-    /// @param player1 Player1 address
-    /// @param player2 Player2 address
-    /// @param tokensAllowed Tokens allowed to be traded during the match
-    /// @param buyIn Buy in amount
-    /// @param duration Match duration
+    /// @param _player1 Player1 address
+    /// @param _player2 Player2 address
+    /// @param _tokensAllowed Tokens allowed to be traded during the match
+    /// @param _buyIn Buy in amount
+    /// @param _duration Match duration
     function _createMatch(
-        address player1,
-        address player2,
-        uint32[] memory tokensAllowed,
-        uint256 buyIn,
-        uint256 duration
+        address _player1,
+        address _player2,
+        uint32[] memory _tokensAllowed,
+        uint256 _buyIn,
+        uint256 _duration
     ) internal {
-        if (tokensAllowed.length == 0) revert ZeroToken();
-        if (buyIn == 0 || buyIn > maxBuyIn || buyIn < minBuyIn) revert WrongBuyIn();
-        if (duration == 0 || duration > maxDuration || duration < minDuration) revert WrongDuration();
+        if (_tokensAllowed.length == 0) revert ZeroToken();
+        if (_buyIn == 0 || _buyIn > maxBuyIn || _buyIn < minBuyIn) revert WrongBuyIn();
+        if (_duration == 0 || _duration > maxDuration || _duration < minDuration) revert WrongDuration();
         // check if all tokens are enabled to trade
         // permit duplicate
         uint256 nextMatchId = ++matchId;
-        uint256 length = tokensAllowed.length;
+        uint256 length = _tokensAllowed.length;
         for (uint256 i; i < length;) {
-            uint32 tokenAllowed = tokensAllowed[i];
+            uint32 tokenAllowed = _tokensAllowed[i];
             // 0 is virtual usd
-            if (tokensAllowed[i] == 0 || tradingTokens[tokenAllowed] == 0) revert TokenNotEnabled();
+            if (tokenAllowed == 0 || tradingTokens[tokenAllowed] == 0) revert TokenNotEnabled();
             if (isMatchTokensAllowed[nextMatchId][tokenAllowed]) revert TokenAlreadyEnabled();
             isMatchTokensAllowed[nextMatchId][tokenAllowed] = true;
             unchecked {
                 ++i;
             }
         }
-        matches[nextMatchId] = MatchInfo(player1, player2, address(0), buyIn, duration, 0, MatchStatus.TO_START);
+        matches[nextMatchId] = MatchInfo(_player1, _player2, address(0), _buyIn, _duration, 0, MatchStatus.TO_START);
         // store it as array also
-        matchTokensAllowed[nextMatchId] = tokensAllowed;
+        matchTokensAllowed[nextMatchId] = _tokensAllowed;
 
-        emit MatchCreated(buyIn, duration, nextMatchId);
+        emit MatchCreated(_buyIn, _duration, nextMatchId);
     }
 
     /// @notice Join a match
@@ -231,14 +229,14 @@ abstract contract Duel is Ownable2Step {
 
     /// @notice Swap tokens in a match
     /// @param _matchId Match id
-    /// @param tokensIn Tokens to swap for
-    /// @param tokensOut Tokens to obtain
-    /// @param amountsIn Amounts to swap for
+    /// @param _tokensIn Tokens to swap for
+    /// @param _tokensOut Tokens to obtain
+    /// @param _amountsIn Amounts to swap for
     function swap(
         uint256 _matchId,
-        uint32[] calldata tokensIn,
-        uint32[] calldata tokensOut,
-        uint256[] calldata amountsIn
+        uint32[] calldata _tokensIn,
+        uint32[] calldata _tokensOut,
+        uint256[] calldata _amountsIn
     ) external onlyExistingMatch(_matchId) {
         // check if it's a player
         MatchInfo memory matchInfo = matches[_matchId];
@@ -248,18 +246,18 @@ abstract contract Duel is Ownable2Step {
         // check if the match has to conclude
         if (block.timestamp >= matchInfo.endTime) revert NotOngoingMatch();
 
-        uint256 length = tokensIn.length;
-        if (length != tokensOut.length) revert DifferentLength();
-        if (length != amountsIn.length) revert DifferentLength();
+        uint256 length = _tokensIn.length;
+        if (length != _tokensOut.length) revert DifferentLength();
+        if (length != _amountsIn.length) revert DifferentLength();
 
         uint32 tokenIn;
         uint32 tokenOut;
         uint256 amountIn;
         for (uint256 i; i < length;) {
             // check if the tokens id are valid
-            tokenIn = tokensIn[i];
-            tokenOut = tokensOut[i];
-            amountIn = amountsIn[i];
+            tokenIn = _tokensIn[i];
+            tokenOut = _tokensOut[i];
+            amountIn = _amountsIn[i];
             if (amountIn == 0) revert ZeroAmount();
             if (tokenIn == tokenOut) revert SameToken();
             if (tokenIn != 0 && !isMatchTokensAllowed[_matchId][tokenIn]) revert TokenNotEnabled();
@@ -335,11 +333,11 @@ abstract contract Duel is Ownable2Step {
 
             // calculate prize
             prize = buyIn * 2;
-            uint256 fee = prize * platformFee / BASE_FEE;
+            uint256 fee = prize * platformFeePercentage / BASE_FEE;
             // transfer prize to the winner
             buyInToken.safeTransfer(winner, prize - fee);
-            // transfer platform fee to the dao
-            buyInToken.safeTransfer(feeRecipient, fee);
+            // account fee in the contract
+            accruedPlatformFee += fee;
         }
 
         emit MatchConcluded(winner, prize, _matchId);
@@ -375,13 +373,22 @@ abstract contract Duel is Ownable2Step {
     }
 
     /// @notice Get the token price
-    /// @param index Token index
-    function tokenPx(uint32 index) public view virtual returns (uint64);
+    /// @param _index Token index
+    function tokenPx(uint32 _index) public view virtual returns (uint64);
 
     /// @notice Get the match tokens allowed list
     /// @param _matchId Match id
     function getMatchTokensAllowed(uint256 _matchId) external view returns (uint32[] memory _tokensAllowed) {
         _tokensAllowed = matchTokensAllowed[_matchId];
+    }
+
+    /// @notice Withdraw platform fee
+    /// @param _amount Amount to withdraw
+    /// @param _recipient Fee recipient
+    function withdrawPlatformFee(uint256 _amount, address _recipient) external onlyOwner {
+        if (_recipient == address(0)) revert ZeroAddress();
+        accruedPlatformFee -= _amount;
+        buyInToken.safeTransfer(_recipient, _amount);
     }
 
     /// @notice Enable/Disable trading tokens
@@ -392,10 +399,10 @@ abstract contract Duel is Ownable2Step {
     }
 
     /// @notice Set platform fees
-    /// @param _platformFee Platform fees
-    function setPlatformFee(uint256 _platformFee) external onlyOwner {
-        if (_platformFee > BASE_FEE) revert FeeTooHigh();
-        platformFee = _platformFee;
+    /// @param _platformFeePercentage Platform fees percentage (10_000 = 100%)
+    function setPlatformFeePercentage(uint256 _platformFeePercentage) external onlyOwner {
+        if (_platformFeePercentage > MAX_PLATFORM_FEE) revert FeeTooHigh();
+        platformFeePercentage = _platformFeePercentage;
     }
 
     /// @notice Set min buy in for the match

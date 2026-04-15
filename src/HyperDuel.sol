@@ -17,16 +17,16 @@ contract HyperDuel is Duel {
     // Constant
     address constant SPOT_PX_PRECOMPILE_ADDRESS = 0x0000000000000000000000000000000000000808;
 
-    constructor(address buyInToken_, uint256 platformFee_, address feeRecipient_)
-        Duel(buyInToken_, platformFee_, feeRecipient_)
-    {}
+    error PriceCallFailed();
+
+    constructor(address buyInToken_, uint256 platformFeePercentage_) Duel(buyInToken_, platformFeePercentage_) {}
 
     /// @notice Get the token price for the spot asset in hyperliquid
-    /// @param index Spot token index
-    function tokenPx(uint32 index) public view override returns (uint64) {
+    /// @param _index Spot token index
+    function tokenPx(uint32 _index) public view override returns (uint64) {
         bool success;
         bytes memory result;
-        (success, result) = SPOT_PX_PRECOMPILE_ADDRESS.staticcall(abi.encode(index));
+        (success, result) = SPOT_PX_PRECOMPILE_ADDRESS.staticcall(abi.encode(_index));
         if (!success) revert PriceCallFailed();
         return abi.decode(result, (uint64));
     }

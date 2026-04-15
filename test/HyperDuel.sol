@@ -14,11 +14,12 @@ contract HyperDuelTest is Test {
     MockSpotPx internal spotPxPrecompile;
     HyperDuel internal duel;
 
+    // 0x2B3370eE501B4a559b57D449569354196457D8Ab usdc testnet
     IERC20 internal buyInToken = IERC20(0xb88339CB7199b77E23DB6E890353E22632Ba630f); // USDC hl testnet
     address internal feeRecipient = address(0xBEEF);
     address internal playerA = address(0xABCD);
     address internal playerB = address(0xABBB);
-    uint256 platformFee;
+    uint256 platformFeePercentage;
     uint32 btcIndex = 142;
     uint32 ethIndex = 151;
     uint32 solIndex = 156;
@@ -27,7 +28,7 @@ contract HyperDuelTest is Test {
         vm.createSelectFork("hl_mainnet");
 
         // deploy duel contract
-        duel = new HyperDuel(address(buyInToken), platformFee, feeRecipient);
+        duel = new HyperDuel(address(buyInToken), platformFeePercentage);
 
         // enable token
         // BTC
@@ -55,7 +56,7 @@ contract HyperDuelTest is Test {
     }
 
     function test_deploy() public view {
-        assertEq(duel.platformFee(), platformFee);
+        assertEq(duel.platformFeePercentage(), platformFeePercentage);
     }
 
     function test_createMatchWithoutJoin() external {
