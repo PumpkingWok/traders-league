@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
 import {IERC20Metadata} from "openzeppelin/token/ERC20/extensions/IERC20Metadata.sol";
@@ -49,7 +49,7 @@ abstract contract Duel is Ownable2Step {
     mapping(uint256 => MatchInfo) public matches;
 
     // tokens id => usd price decimals
-    mapping(uint32 => uint8) public tradingTokens;
+    mapping(uint32 => uint8) public tradingTokensDecimals;
 
     // match id => tokens id => allowed
     mapping(uint256 => mapping(uint32 => bool)) public isMatchTokensAllowed;
@@ -154,7 +154,7 @@ abstract contract Duel is Ownable2Step {
         for (uint256 i; i < length;) {
             uint32 tokenAllowed = _tokensAllowed[i];
             // 0 is virtual usd
-            if (tokenAllowed == 0 || tradingTokens[tokenAllowed] == 0) revert TokenNotEnabled();
+            if (tokenAllowed == 0 || tradingTokensDecimals[tokenAllowed] == 0) revert TokenNotEnabled();
             if (isMatchTokensAllowed[nextMatchId][tokenAllowed]) revert TokenAlreadyEnabled();
             isMatchTokensAllowed[nextMatchId][tokenAllowed] = true;
             unchecked {
@@ -283,12 +283,12 @@ abstract contract Duel is Ownable2Step {
         // obtain usd value of token in
         uint256 usdIn = _amountIn;
         if (_tokenIn != 0) {
-            usdIn = usdIn * uint256(tokenPx(_tokenIn)) / (10 ** tradingTokens[_tokenIn]);
+            usdIn = usdIn * uint256(tokenPx(_tokenIn)) / (10 ** tradingTokensDecimals[_tokenIn]);
         }
 
         uint256 amountOut = usdIn - (usdIn * GAME_TRADER_FEE / BASE_FEE);
         if (_tokenOut != 0) {
-            amountOut = amountOut * (10 ** tradingTokens[_tokenOut]) / uint256(tokenPx(_tokenOut));
+            amountOut = amountOut * (10 ** tradingTokensDecimals[_tokenOut]) / uint256(tokenPx(_tokenOut));
         }
 
         matchBalances[msg.sender][_matchId][_tokenOut] += amountOut;
@@ -361,7 +361,7 @@ abstract contract Duel is Ownable2Step {
             uint32 token = tokensAllowed[i];
             uint256 balance = matchBalances[_player][_matchId][token];
             if (balance != 0) {
-                uint256 usdValue = balance * uint256(tokenPx(token)) / (10 ** tradingTokens[token]);
+                uint256 usdValue = balance * uint256(tokenPx(token)) / (10 ** tradingTokensDecimals[token]);
                 totalUsd += usdValue;
             }
             unchecked {
@@ -393,10 +393,11 @@ abstract contract Duel is Ownable2Step {
 
     /// @notice Enable/Disable trading tokens
     /// @param _tokenId Token index
-    /// @param _tokenPxDecimals TokenPx decimals (0 to disable the token)
-    function toggleTradingToken(uint32 _tokenId, uint8 _tokenPxDecimals) external onlyOwner {
-        tradingTokens[_tokenId] = _tokenPxDecimals;
+    function toggleTradingToken(uint32 _tokenId) external onlyOwner {
+        _toggleTradingToken(_tokenId);
     }
+
+    function _toggleTradingToken(uint32 _tokenId) internal virtual;
 
     /// @notice Set platform fees
     /// @param _platformFeePercentage Platform fees percentage (10_000 = 100%)

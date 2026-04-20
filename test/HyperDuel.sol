@@ -1,42 +1,52 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
 import {Test} from "forge-std/Test.sol";
 
 import {IERC20} from "openzeppelin/token/ERC20/IERC20.sol";
 
+import {MockPrecompileLive} from "./mocks/MockPrecompileLive.sol";
 import {MockSpotPx} from "./mocks/MockSpotPx.sol";
 
 import {HyperDuel} from "src/HyperDuel.sol";
 import {IHyperDuel} from "./IHyperDuel.sol";
 
-contract HyperDuelTest is Test {
+abstract contract HyperDuelTest is Test {
     MockSpotPx internal spotPxPrecompile;
     HyperDuel internal duel;
 
     // 0x2B3370eE501B4a559b57D449569354196457D8Ab usdc testnet
-    IERC20 internal buyInToken = IERC20(0xb88339CB7199b77E23DB6E890353E22632Ba630f); // USDC hl testnet
+    IERC20 internal buyInToken; // = IERC20(0xb88339CB7199b77E23DB6E890353E22632Ba630f); // USDC hl testnet
     address internal feeRecipient = address(0xBEEF);
     address internal playerA = address(0xABCD);
     address internal playerB = address(0xABBB);
     uint256 platformFeePercentage;
-    uint32 btcIndex = 142;
-    uint32 ethIndex = 151;
-    uint32 solIndex = 156;
+
+    string forkName;
+    // token index used to get the token name and token spot index
+    uint32[] tokensIndex;
+    // real index used in contract to get the spotPx
+    uint32[] tokensSpotIndex;
+    uint8[] tokensDecimal;
+
+    constructor(string memory forkName_, address buyInToken_) {
+        forkName = forkName_;
+        buyInToken = IERC20(buyInToken_);
+    }
 
     function setUp() public {
-        vm.createSelectFork("hl_mainnet");
+        vm.createSelectFork(forkName);
+
+        _mockPrecompiles();
 
         // deploy duel contract
         duel = new HyperDuel(address(buyInToken), platformFeePercentage);
 
         // enable token
-        // BTC
-        duel.toggleTradingToken(btcIndex, 3);
-        // ETH
-        duel.toggleTradingToken(ethIndex, 4);
-        // SOL
-        duel.toggleTradingToken(solIndex, 5);
+        for (uint256 i; i < tokensIndex.length; ++i) {
+            duel.toggleTradingToken(tokensIndex[i]);
+            assertEq(duel.tradingTokensDecimals(tokensSpotIndex[i]), tokensDecimal[i]);
+        }
 
         deal(address(buyInToken), playerA, 100e6);
         deal(address(buyInToken), playerB, 100e6);
@@ -45,19 +55,16 @@ contract HyperDuelTest is Test {
         buyInToken.approve(address(duel), 100e6);
         vm.prank(playerB);
         buyInToken.approve(address(duel), 100e6);
-
-        spotPxPrecompile = new MockSpotPx();
-        vm.etch(0x0000000000000000000000000000000000000808, address(spotPxPrecompile).code);
-        spotPxPrecompile = MockSpotPx(0x0000000000000000000000000000000000000808);
-
-        spotPxPrecompile.setSpotPx(btcIndex, 70000000); // 70K, 3 decimals
-        spotPxPrecompile.setSpotPx(ethIndex, 30000000); // 3K, 4 decimals
-        spotPxPrecompile.setSpotPx(solIndex, 10000000); // 100, 5 decimals
     }
 
     function test_deploy() public view {
         assertEq(duel.platformFeePercentage(), platformFeePercentage);
     }
+
+    // function getTokenNameById() public {
+    //     string memory tokenName = duel.getTokenNameById(142);
+    //     assertEq(tokenName, "BTC");
+    // }
 
     function test_createMatchWithoutJoin() external {
         (uint256 buyIn, uint256 duration, uint32[] memory tokensAllowed) = _getDefaultMatchData();
@@ -66,9 +73,9 @@ contract HyperDuelTest is Test {
 
         uint32[] memory matchTokensAllowed = duel.getMatchTokensAllowed(1);
         assertEq(matchTokensAllowed.length, 3);
-        assertEq(matchTokensAllowed[0], tokensAllowed[0]);
-        assertEq(matchTokensAllowed[1], tokensAllowed[1]);
-        assertEq(matchTokensAllowed[2], tokensAllowed[2]);
+        assertEq(matchTokensAllowed[0], tokensSpotIndex[0]);
+        assertEq(matchTokensAllowed[1], tokensSpotIndex[1]);
+        assertEq(matchTokensAllowed[2], tokensSpotIndex[2]);
 
         _checkMatchInfo(1, address(0), address(0), address(0), buyIn, duration, 0, IHyperDuel.MatchStatus.TO_START);
     }
@@ -172,9 +179,9 @@ contract HyperDuelTest is Test {
         duel.swap(1, tokensIn, tokensOut, amountsIn);
 
         assertEq(duel.matchBalances(playerA, 1, 0), amountsIn[0]);
-        assertGt(duel.matchBalances(playerA, 1, btcIndex), 0);
-        assertEq(duel.matchBalances(playerA, 1, ethIndex), 0);
-        assertEq(duel.matchBalances(playerA, 1, solIndex), 0);
+        assertGt(duel.matchBalances(playerA, 1, tokensSpotIndex[0]), 0);
+        assertEq(duel.matchBalances(playerA, 1, tokensSpotIndex[1]), 0);
+        assertEq(duel.matchBalances(playerA, 1, tokensSpotIndex[2]), 0);
 
         uint256 startTs = block.timestamp;
         vm.warp(startTs + duration + 1);
@@ -199,9 +206,9 @@ contract HyperDuelTest is Test {
         buyIn = 10e6;
         duration = 1 days;
         tokensAllowed = new uint32[](3);
-        tokensAllowed[0] = btcIndex;
-        tokensAllowed[1] = ethIndex;
-        tokensAllowed[2] = solIndex;
+        tokensAllowed[0] = tokensSpotIndex[0];
+        tokensAllowed[1] = tokensSpotIndex[1];
+        tokensAllowed[2] = tokensSpotIndex[2];
     }
 
     function _checkMatchInfo(
@@ -222,5 +229,38 @@ contract HyperDuelTest is Test {
         assertEq(matchInfo.duration, duration);
         assertEq(matchInfo.endTime, endTs);
         assertEq(uint8(matchInfo.status), uint8(status));
+    }
+
+    function _mockPrecompiles() internal {
+        for (uint160 i = 0; i < 17; i++) {
+            address precompileAddress = address(uint160(0x0000000000000000000000000000000000000800) + i);
+            vm.etch(precompileAddress, type(MockPrecompileLive).runtimeCode);
+            vm.allowCheatcodes(precompileAddress);
+        }
+
+        // Owerwrite precompiles required to change
+        // vm.etch(0x0000000000000000000000000000000000000808, type(MockSpotPx).runtimeCode);
+        // spotPxPrecompile = MockSpotPx(0x0000000000000000000000000000000000000808);
+    }
+}
+
+contract HyperDuelTestMainnet is HyperDuelTest {
+    address public constant BUY_IN_TOKEN_MAINNET = 0xb88339CB7199b77E23DB6E890353E22632Ba630f;
+
+    constructor() HyperDuelTest("hl_mainnet", BUY_IN_TOKEN_MAINNET) {
+        // 197 BTC, 3 decimals
+        // 221 ETH, 4 decimals
+        // 254 SOL, 5 decimals
+        tokensIndex.push(197);
+        tokensIndex.push(221);
+        tokensIndex.push(254);
+
+        tokensSpotIndex.push(142);
+        tokensSpotIndex.push(151);
+        tokensSpotIndex.push(156);
+
+        tokensDecimal.push(3);
+        tokensDecimal.push(4);
+        tokensDecimal.push(5);
     }
 }
