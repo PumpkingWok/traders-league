@@ -27,10 +27,11 @@ contract HyperDuel is Duel {
     constructor(address buyInToken_, uint256 platformFeePercentage_) Duel(buyInToken_, platformFeePercentage_) {}
 
     /// @notice Enable a trading token setting the usd spot price decimals (0 to disable the token)
-    function _toggleTradingToken(uint32 _tokenId) internal override {
-        // disable it
+    function toggleTradingToken(uint32 _tokenId) external onlyOwner {
+        // disable it setting decimals to zero
         if (tradingTokensDecimals[_tokenId] != 0) {
             tradingTokensDecimals[_tokenId] = 0;
+            return;
         }
         (bool success, bytes memory result) = TOKEN_INFO_PRECOMPILE_ADDRESS.staticcall(abi.encode(_tokenId));
         if (!success || result.length == 0) revert TokenInfoCallFailed();
@@ -38,8 +39,6 @@ contract HyperDuel is Duel {
         uint8 szDecimals;
         uint64 spotTokenId;
         string memory tokenName;
-        assembly {}
-
         assembly {
             // 1) fetch szDecimals
             szDecimals := and(mload(add(result, 0xE0)), 0xff)
@@ -65,7 +64,7 @@ contract HyperDuel is Duel {
         tokensName[uint32(spotTokenId)] = tokenName;
 
         // spot price decimals is 8 - szDecimals
-        tradingTokensDecimals[uint32(spotTokenId)] = 8 - szDecimals;
+        _toggleTradingToken(uint32(spotTokenId), 8 - szDecimals);
     }
 
     /// @notice Get the token price for the spot asset in hyperliquid

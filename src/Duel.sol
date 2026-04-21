@@ -391,13 +391,9 @@ abstract contract Duel is Ownable2Step {
         buyInToken.safeTransfer(_recipient, _amount);
     }
 
-    /// @notice Enable/Disable trading tokens
-    /// @param _tokenId Token index
-    function toggleTradingToken(uint32 _tokenId) external onlyOwner {
-        _toggleTradingToken(_tokenId);
+    function _toggleTradingToken(uint32 _tokenId, uint8 _decimals) internal virtual {
+        tradingTokensDecimals[_tokenId] = _decimals;
     }
-
-    function _toggleTradingToken(uint32 _tokenId) internal virtual;
 
     /// @notice Set platform fees
     /// @param _platformFeePercentage Platform fees percentage (10_000 = 100%)
