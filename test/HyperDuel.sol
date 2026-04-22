@@ -26,12 +26,23 @@ abstract contract HyperDuelTest is Test {
     uint32[] tokensIndex;
     // real index used in contract to get the spotPx
     uint32[] tokensSpotIndex;
-    uint8[] tokensDecimal;
-    string[] tokensName;
+    uint8[] tokensDecimals;
+    string[] tokensName = new string[](3);
 
-    constructor(string memory forkName_, address buyInToken_) {
+    constructor(
+        string memory forkName_,
+        address buyInToken_,
+        uint32[3] memory tokensIndex_,
+        uint32[3] memory tokensSpotIndex_,
+        uint8[3] memory tokensDecimals_,
+        string[3] memory tokensName_
+    ) {
         forkName = forkName_;
         buyInToken = IERC20(buyInToken_);
+        tokensIndex = tokensIndex_;
+        tokensSpotIndex = tokensSpotIndex_;
+        tokensDecimals = tokensDecimals_;
+        tokensName = tokensName_;
     }
 
     function setUp() public {
@@ -64,7 +75,7 @@ abstract contract HyperDuelTest is Test {
 
     function test_TradingTokens() public {
         for (uint256 i; i < tokensSpotIndex.length; ++i) {
-            assertEq(duel.tradingTokensDecimals(tokensSpotIndex[i]), tokensDecimal[i]);
+            assertEq(duel.tradingTokensDecimals(tokensSpotIndex[i]), tokensDecimals[i]);
             assertEq(duel.tokensName(tokensSpotIndex[i]), tokensName[i]);
         }
     }
@@ -80,9 +91,6 @@ abstract contract HyperDuelTest is Test {
         for (uint256 i; i < lenght; ++i) {
             assertEq(matchTokensAllowed[i], tokensSpotIndex[i]);
         }
-        // assertEq(matchTokensAllowed[0], tokensSpotIndex[0]);
-        // assertEq(matchTokensAllowed[1], tokensSpotIndex[1]);
-        // assertEq(matchTokensAllowed[2], tokensSpotIndex[2]);
 
         _checkMatchInfo(1, address(0), address(0), address(0), buyIn, duration, 0, IHyperDuel.MatchStatus.TO_START);
     }
@@ -256,53 +264,35 @@ abstract contract HyperDuelTest is Test {
     }
 }
 
-contract HyperDuelTestMainnet is HyperDuelTest {
-    address public constant BUY_IN_TOKEN_MAINNET = 0xb88339CB7199b77E23DB6E890353E22632Ba630f;
+address constant BUY_IN_TOKEN_MAINNET = 0xb88339CB7199b77E23DB6E890353E22632Ba630f; // USDC
+address constant BUY_IN_TOKEN_TESTNET = 0x2B3370eE501B4a559b57D449569354196457D8Ab; // USDC
 
-    constructor() HyperDuelTest("hl_mainnet", BUY_IN_TOKEN_MAINNET) {
-        // 197 BTC, 3 decimals
-        // 221 ETH, 4 decimals
-        // 254 SOL, 5 decimals
-        tokensIndex.push(197);
-        tokensIndex.push(221);
-        tokensIndex.push(254);
+// hyperliquid mainnet indexes
+// UBTC -> tokenIndex 197, spot index 142, decimals 3
+// UETH -> tokenIndex 221, spot index 151, decimals 4
+// USOL -> tokenIndex 254, spot index 156, decimals 5
+contract HyperDuelTestMainnet is
+    HyperDuelTest(
+        "hl_mainnet",
+        BUY_IN_TOKEN_MAINNET,
+        [uint32(197), uint32(221), uint32(254)],
+        [uint32(142), uint32(151), uint32(156)],
+        [3, 4, 5],
+        ["UBTC", "UETH", "USOL"]
+    )
+{}
 
-        // 142 BTC/USD
-        // 151 ETH/USD
-        // 156 SOL/USD
-        tokensSpotIndex.push(142);
-        tokensSpotIndex.push(151);
-        tokensSpotIndex.push(156);
-
-        tokensDecimal.push(3);
-        tokensDecimal.push(4);
-        tokensDecimal.push(5);
-
-        tokensName.push("UBTC");
-        tokensName.push("UETH");
-        tokensName.push("USOL");
-    }
-}
-
-contract HyperDuelTestTestnet is HyperDuelTest {
-    address public constant BUY_IN_TOKEN_TESTNET = 0x2B3370eE501B4a559b57D449569354196457D8Ab;
-
-    constructor() HyperDuelTest("hl_testnet", BUY_IN_TOKEN_TESTNET) {
-        // 1105 HYPE, 6 decimals
-        // 1242 ETH, 4 decimals
-        tokensIndex.push(1105);
-        tokensIndex.push(1242);
-
-        // 1035 HYPE/USD
-        // 1242 ETH/USD
-        tokensSpotIndex.push(1035);
-        tokensSpotIndex.push(1137);
-
-        tokensDecimal.push(6);
-        tokensDecimal.push(4);
-
-        tokensName.push("HYPE");
-        tokensName.push("UETH");
-    }
-}
+// HYPE -> tokenIndex 1105, spot index 1035, decimals 6
+// UETH -> tokenIndex 1242, spot index 1137, decimals 4
+// HORSE -> tokenIndex 1435, spot index 1319, decimals 6
+contract HyperDuelTestTestnet is
+    HyperDuelTest(
+        "hl_testnet",
+        BUY_IN_TOKEN_TESTNET,
+        [uint32(1105), uint32(1242), uint32(1435)],
+        [uint32(1035), uint32(1137), uint32(1319)],
+        [6, 4, 6],
+        ["HYPE", "UETH", "HORSE"]
+    )
+{}
 

@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
-import {IERC20Metadata} from "openzeppelin/token/ERC20/extensions/IERC20Metadata.sol";
-import {SafeERC20} from "openzeppelin/token/ERC20/utils/SafeERC20.sol";
-import "openzeppelin/access/Ownable2Step.sol";
-
 import {Duel} from "./Duel.sol";
 import {L1Read} from "./L1Read.sol";
 
@@ -30,9 +26,10 @@ contract HyperDuel is Duel {
         if (!success || result.length == 0) revert TokenInfoCallFailed();
 
         L1Read.TokenInfo memory tokenInfo = abi.decode(result, (L1Read.TokenInfo));
+        if (tokenInfo.spots.length == 0) revert TokenInfoCallFailed();
 
-        // revert if szDecimal is not at least 8
         // spot price decimals is 8 - szDecimals
+        if (tokenInfo.szDecimals > 8) revert TokenInfoCallFailed();
         uint8 tokenDecimal = 8 - tokenInfo.szDecimals;
         // get the first spot index as price source
         uint32 spotTokenId = uint32(tokenInfo.spots[0]);

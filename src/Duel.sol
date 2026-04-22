@@ -37,7 +37,7 @@ abstract contract Duel is Ownable2Step {
     IERC20Metadata public immutable buyInToken;
     uint256 public minBuyIn;
     uint256 public maxBuyIn;
-    uint256 public minDuration = 1 hours;
+    uint256 public minDuration = 15 minutes;
     uint256 public maxDuration = 1 weeks;
 
     uint256 public platformFeePercentage;
@@ -45,19 +45,19 @@ abstract contract Duel is Ownable2Step {
 
     uint256 public matchId;
 
-    // match Id => match info
+    /// @notice match Id => match info
     mapping(uint256 => MatchInfo) public matches;
 
-    // tokens id => usd price decimals
+    /// @notice tokens id => usd price decimals
     mapping(uint32 => uint8) public tradingTokensDecimals;
 
-    // match id => tokens id => allowed
-    mapping(uint256 => mapping(uint32 => bool)) public isMatchTokensAllowed;
+    /// @notice match id => tokens id => usd price decimals
+    mapping(uint256 => mapping(uint32 => uint8)) public matchTokensDecimals;
 
-    // match id => tokens allowed to trade
+    /// @notice match id => tokens allowed to trade
     mapping(uint256 => uint32[]) public matchTokensAllowed;
 
-    // player => matchId => token => balance
+    /// @notice player => matchId => token => balance
     mapping(address => mapping(uint256 => mapping(uint256 => uint256))) public matchBalances;
 
     error DifferentLength();
@@ -66,6 +66,7 @@ abstract contract Duel is Ownable2Step {
     error NotAllowed();
     error NotAuthorized();
     error NotOngoingMatch();
+    error NotToStartMatch();
     error OnlyPlayer();
     error SamePlayer();
     error SameToken();
@@ -105,8 +106,8 @@ abstract contract Duel is Ownable2Step {
         buyInToken = IERC20Metadata(buyInToken_);
         platformFeePercentage = platformFeePercentage_;
 
-        minBuyIn = 10 * (10 ** buyInToken.decimals());
-        maxBuyIn = 1000 * (10 ** buyInToken.decimals());
+        minBuyIn = 10 * (10 ** buyInToken.decimals()); // 10
+        maxBuyIn = 1000 * (10 ** buyInToken.decimals()); // 1000
     }
 
     /// @notice Create a match deciding the tokens allowed, duration and buyIn amount
@@ -132,14 +133,14 @@ abstract contract Duel is Ownable2Step {
     }
 
     /// @notice Create a match
-    /// @param _player1 Player1 address
-    /// @param _player2 Player2 address
+    /// @param _playerA PlayerA address
+    /// @param _playerB PlayerB address
     /// @param _tokensAllowed Tokens allowed to be traded during the match
     /// @param _buyIn Buy in amount
     /// @param _duration Match duration
     function _createMatch(
-        address _player1,
-        address _player2,
+        address _playerA,
+        address _playerB,
         uint32[] memory _tokensAllowed,
         uint256 _buyIn,
         uint256 _duration
@@ -155,13 +156,21 @@ abstract contract Duel is Ownable2Step {
             uint32 tokenAllowed = _tokensAllowed[i];
             // 0 is virtual usd
             if (tokenAllowed == 0 || tradingTokensDecimals[tokenAllowed] == 0) revert TokenNotEnabled();
-            if (isMatchTokensAllowed[nextMatchId][tokenAllowed]) revert TokenAlreadyEnabled();
-            isMatchTokensAllowed[nextMatchId][tokenAllowed] = true;
+            if (matchTokensDecimals[nextMatchId][tokenAllowed] != 0) revert TokenAlreadyEnabled();
+            matchTokensDecimals[nextMatchId][tokenAllowed] = tradingTokensDecimals[tokenAllowed];
             unchecked {
                 ++i;
             }
         }
-        matches[nextMatchId] = MatchInfo(_player1, _player2, address(0), _buyIn, _duration, 0, MatchStatus.TO_START);
+        matches[nextMatchId] = MatchInfo({
+            playerA: _playerA,
+            playerB: _playerB,
+            winner: address(0),
+            buyIn: _buyIn,
+            duration: _duration,
+            endTime: 0,
+            status: MatchStatus.TO_START
+        });
         // store it as array also
         matchTokensAllowed[nextMatchId] = _tokensAllowed;
 
@@ -172,8 +181,8 @@ abstract contract Duel is Ownable2Step {
     /// @param _matchId Match id to join
     function joinMatch(uint256 _matchId) external onlyExistingMatch(_matchId) {
         MatchInfo storage matchInfo = matches[_matchId];
-        // check if match is ongoing
-        if (matchInfo.status != MatchStatus.TO_START) revert OngoingMatch();
+        // check if match is not in to start status
+        if (matchInfo.status != MatchStatus.TO_START) revert NotToStartMatch();
 
         bool matchStarted;
         if (matchInfo.playerA == address(0)) {
@@ -211,7 +220,7 @@ abstract contract Duel is Ownable2Step {
     function unjoinMatch(uint256 _matchId) external onlyExistingMatch(_matchId) {
         MatchInfo storage matchInfo = matches[_matchId];
         if (matchInfo.playerA != msg.sender) revert NotAllowed();
-        if (matchInfo.status != MatchStatus.TO_START) revert OngoingMatch();
+        if (matchInfo.status != MatchStatus.TO_START) revert NotToStartMatch();
 
         // transfer back token to player A
         buyInToken.safeTransfer(msg.sender, matchInfo.buyIn);
@@ -221,17 +230,36 @@ abstract contract Duel is Ownable2Step {
             matchInfo.playerA = address(0);
             emit MatchUnjoined(msg.sender, _matchId);
         } else {
-            // reserved match, mark is as removed
+            // reserved match, mark it as removed
             matchInfo.status = MatchStatus.REMOVED;
             emit MatchReservedRemoved(msg.sender, _matchId);
         }
     }
 
-    /// @notice Swap tokens in a match
+    /// @notice Single Swap function
     /// @param _matchId Match id
-    /// @param _tokensIn Tokens to swap for
-    /// @param _tokensOut Tokens to obtain
-    /// @param _amountsIn Amounts to swap for
+    /// @param _tokenIn Token to sell
+    /// @param _tokenOut Token to buy
+    /// @param _amountIn Amount to sell
+    function swap(uint256 _matchId, uint32 _tokenIn, uint32 _tokenOut, uint256 _amountIn)
+        external
+        onlyExistingMatch(_matchId)
+    {
+        // check if it's a player
+        MatchInfo memory matchInfo = matches[_matchId];
+
+        _validateMatchInfo(matchInfo.playerA, matchInfo.playerB, matchInfo.status, matchInfo.endTime);
+
+        _validateSwapInfo(_matchId, _tokenIn, _tokenOut, _amountIn);
+
+        _swap(_matchId, _tokenIn, _tokenOut, _amountIn);
+    }
+
+    /// @notice Multi Swap function
+    /// @param _matchId Match id
+    /// @param _tokensIn Tokens to sell
+    /// @param _tokensOut Tokens to buy
+    /// @param _amountsIn Amounts to sell
     function swap(
         uint256 _matchId,
         uint32[] calldata _tokensIn,
@@ -240,15 +268,11 @@ abstract contract Duel is Ownable2Step {
     ) external onlyExistingMatch(_matchId) {
         // check if it's a player
         MatchInfo memory matchInfo = matches[_matchId];
-        if (matchInfo.playerA != msg.sender && matchInfo.playerB != msg.sender) revert OnlyPlayer();
-        // check if the match is ongoing
-        if (matchInfo.status != MatchStatus.ONGOING) revert NotOngoingMatch();
-        // check if the match has to conclude
-        if (block.timestamp >= matchInfo.endTime) revert NotOngoingMatch();
+
+        _validateMatchInfo(matchInfo.playerA, matchInfo.playerB, matchInfo.status, matchInfo.endTime);
 
         uint256 length = _tokensIn.length;
-        if (length != _tokensOut.length) revert DifferentLength();
-        if (length != _amountsIn.length) revert DifferentLength();
+        if (length != _tokensOut.length || length != _amountsIn.length) revert DifferentLength();
 
         uint32 tokenIn;
         uint32 tokenOut;
@@ -258,10 +282,7 @@ abstract contract Duel is Ownable2Step {
             tokenIn = _tokensIn[i];
             tokenOut = _tokensOut[i];
             amountIn = _amountsIn[i];
-            if (amountIn == 0) revert ZeroAmount();
-            if (tokenIn == tokenOut) revert SameToken();
-            if (tokenIn != 0 && !isMatchTokensAllowed[_matchId][tokenIn]) revert TokenNotEnabled();
-            if (tokenOut != 0 && !isMatchTokensAllowed[_matchId][tokenOut]) revert TokenNotEnabled();
+            _validateSwapInfo(_matchId, tokenIn, tokenOut, amountIn);
 
             _swap(_matchId, tokenIn, tokenOut, amountIn);
             unchecked {
@@ -283,17 +304,42 @@ abstract contract Duel is Ownable2Step {
         // obtain usd value of token in
         uint256 usdIn = _amountIn;
         if (_tokenIn != 0) {
-            usdIn = usdIn * uint256(tokenPx(_tokenIn)) / (10 ** tradingTokensDecimals[_tokenIn]);
+            usdIn = usdIn * uint256(tokenPx(_tokenIn)) / (10 ** matchTokensDecimals[_matchId][_tokenIn]);
         }
 
+        // charge platform fees
         uint256 amountOut = usdIn - (usdIn * GAME_TRADER_FEE / BASE_FEE);
+        // if token out is not vUSD swap again the amount to tokenOut
         if (_tokenOut != 0) {
-            amountOut = amountOut * (10 ** tradingTokensDecimals[_tokenOut]) / uint256(tokenPx(_tokenOut));
+            amountOut = amountOut * (10 ** matchTokensDecimals[_matchId][_tokenOut]) / uint256(tokenPx(_tokenOut));
         }
 
         matchBalances[msg.sender][_matchId][_tokenOut] += amountOut;
 
         emit Swap(_tokenIn, _tokenOut, _amountIn, amountOut, msg.sender, _matchId);
+    }
+
+    /// @notice Validate match parameters
+    /// @param _playerA PlayerA address
+    /// @param _playerB PlayerB address
+    /// @param _status Match status
+    /// @param _endTs Match end time
+    function _validateMatchInfo(address _playerA, address _playerB, MatchStatus _status, uint256 _endTs) internal view {
+        if (_playerA != msg.sender && _playerB != msg.sender) revert OnlyPlayer();
+        // check if the match is ongoing and not to be concluded yet
+        if (_status != MatchStatus.ONGOING || block.timestamp >= _endTs) revert NotOngoingMatch();
+    }
+
+    /// @notice Validate swap info
+    /// @param _matchId Match id
+    /// @param _tokenIn Token to sell
+    /// @param _tokenOut Token to buy
+    /// @param _amountIn Amount to swap
+    function _validateSwapInfo(uint256 _matchId, uint32 _tokenIn, uint32 _tokenOut, uint256 _amountIn) internal view {
+        if (_amountIn == 0) revert ZeroAmount();
+        if (_tokenIn == _tokenOut) revert SameToken();
+        if (_tokenIn != 0 && matchTokensDecimals[_matchId][_tokenIn] == 0) revert TokenNotEnabled();
+        if (_tokenOut != 0 && matchTokensDecimals[_matchId][_tokenOut] == 0) revert TokenNotEnabled();
     }
 
     /// @notice Conclude a match
@@ -346,7 +392,12 @@ abstract contract Duel is Ownable2Step {
     /// @notice Calculate the player total usd for the match
     /// @param _matchId Match id
     /// @param _player Player address
-    function getPlayerTotalUsd(uint256 _matchId, address _player) external view returns (uint256 totalUsd) {
+    function getPlayerTotalUsd(uint256 _matchId, address _player)
+        external
+        view
+        onlyExistingMatch(_matchId)
+        returns (uint256 totalUsd)
+    {
         return _getPlayerTotalUsd(_matchId, _player);
     }
 
@@ -361,7 +412,7 @@ abstract contract Duel is Ownable2Step {
             uint32 token = tokensAllowed[i];
             uint256 balance = matchBalances[_player][_matchId][token];
             if (balance != 0) {
-                uint256 usdValue = balance * uint256(tokenPx(token)) / (10 ** tradingTokensDecimals[token]);
+                uint256 usdValue = balance * uint256(tokenPx(token)) / (10 ** matchTokensDecimals[_matchId][token]);
                 totalUsd += usdValue;
             }
             unchecked {
@@ -378,7 +429,12 @@ abstract contract Duel is Ownable2Step {
 
     /// @notice Get the match tokens allowed list
     /// @param _matchId Match id
-    function getMatchTokensAllowed(uint256 _matchId) external view returns (uint32[] memory _tokensAllowed) {
+    function getMatchTokensAllowed(uint256 _matchId)
+        external
+        view
+        onlyExistingMatch(_matchId)
+        returns (uint32[] memory _tokensAllowed)
+    {
         _tokensAllowed = matchTokensAllowed[_matchId];
     }
 
@@ -395,14 +451,13 @@ abstract contract Duel is Ownable2Step {
     /// it's an internal function, another one has that call it has to be defined
     /// @param _tokenId Token id to enable
     /// @param _decimals Token decimals
-    function _enableTradingToken(uint32 _tokenId, uint8 _decimals) internal {
-        if (tradingTokensDecimals[_tokenId] != 0) revert TokenAlreadyEnabled();
-        //uint8 tokenDecimals = _getTokenPxDecimals(_tokenId);
-        //_getSpotTokenId()
+    function _enableTradingToken(uint32 _tokenId, uint8 _decimals) internal virtual {
+        // tokenId = 0 is vUSD enabled by default
+        if (_tokenId == 0 || tradingTokensDecimals[_tokenId] != 0) revert TokenAlreadyEnabled();
         tradingTokensDecimals[_tokenId] = _decimals;
     }
 
-    /// @notice Disable a trading token (not in ongoing matches)
+    /// @notice Disable a trading token for future matches
     /// @param _tokenId Token id to disable
     function disableTradingToken(uint32 _tokenId) external onlyOwner {
         if (tradingTokensDecimals[_tokenId] == 0) revert TokenNotEnabled();
