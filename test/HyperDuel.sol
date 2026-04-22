@@ -44,7 +44,7 @@ abstract contract HyperDuelTest is Test {
 
         // enable token
         for (uint256 i; i < tokensIndex.length; ++i) {
-            duel.toggleTradingToken(tokensIndex[i]);
+            duel.enableTradingToken(tokensIndex[i]);
         }
 
         deal(address(buyInToken), playerA, 100e6);

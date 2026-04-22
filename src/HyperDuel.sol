@@ -6,6 +6,7 @@ import {SafeERC20} from "openzeppelin/token/ERC20/utils/SafeERC20.sol";
 import "openzeppelin/access/Ownable2Step.sol";
 
 import {Duel} from "./Duel.sol";
+import {L1Read} from "./L1Read.sol";
 
 // 1 VS 1 Match creator
 // Hyperliquid version
@@ -14,10 +15,6 @@ import {Duel} from "./Duel.sol";
 // use USDC as buy in token
 // initial virtual usd for every user
 contract HyperDuel is Duel {
-    // Constant
-    address constant SPOT_PX_PRECOMPILE_ADDRESS = 0x0000000000000000000000000000000000000808;
-    address constant TOKEN_INFO_PRECOMPILE_ADDRESS = 0x000000000000000000000000000000000000080C;
-
     // spot token id => token name
     mapping(uint32 => string) public tokensName;
 
@@ -26,51 +23,29 @@ contract HyperDuel is Duel {
 
     constructor(address buyInToken_, uint256 platformFeePercentage_) Duel(buyInToken_, platformFeePercentage_) {}
 
-    /// @notice Enable a trading token setting the usd spot price decimals (0 to disable the token)
-    function toggleTradingToken(uint32 _tokenId) external onlyOwner {
-        // disable it setting decimals to zero
-        if (tradingTokensDecimals[_tokenId] != 0) {
-            tradingTokensDecimals[_tokenId] = 0;
-            return;
-        }
-        (bool success, bytes memory result) = TOKEN_INFO_PRECOMPILE_ADDRESS.staticcall(abi.encode(_tokenId));
+    /// @notice Enable a trading token setting the usd spot price decimals
+    /// @param _tokenId Token id
+    function enableTradingToken(uint32 _tokenId) external onlyOwner {
+        (bool success, bytes memory result) = L1Read.TOKEN_INFO_PRECOMPILE_ADDRESS.staticcall(abi.encode(_tokenId));
         if (!success || result.length == 0) revert TokenInfoCallFailed();
 
-        uint8 szDecimals;
-        uint64 spotTokenId;
-        string memory tokenName;
-        assembly {
-            // 1) fetch szDecimals
-            szDecimals := and(mload(add(result, 0xE0)), 0xff)
+        L1Read.TokenInfo memory tokenInfo = abi.decode(result, (L1Read.TokenInfo));
 
-            let data := add(result, 0x20) // start of returndata payload
-            let tuplePtr := add(data, mload(data)) // TokenInfo tuple start
-
-            // 2) fetch spot token id
-            // slot 1 of TokenInfo head = offset to spots[]
-            let spotsOffset := mload(add(tuplePtr, 0x20))
-            let spotsPtr := add(tuplePtr, spotsOffset)
-
-            // spotsPtr[0] = length, spotsPtr[1] = first element
-            if gt(mload(spotsPtr), 0) {
-                spotTokenId := and(mload(add(spotsPtr, 0x20)), 0xFFFFFFFFFFFFFFFF)
-            }
-
-            // 3) fetch token name
-            let nameOffset := mload(tuplePtr)
-            tokenName := add(tuplePtr, nameOffset)
-        }
-
-        tokensName[uint32(spotTokenId)] = tokenName;
-
+        // revert if szDecimal is not at least 8
         // spot price decimals is 8 - szDecimals
-        _toggleTradingToken(uint32(spotTokenId), 8 - szDecimals);
+        uint8 tokenDecimal = 8 - tokenInfo.szDecimals;
+        // get the first spot index as price source
+        uint32 spotTokenId = uint32(tokenInfo.spots[0]);
+
+        tokensName[spotTokenId] = tokenInfo.name;
+
+        _enableTradingToken(spotTokenId, tokenDecimal);
     }
 
     /// @notice Get the token price for the spot asset in hyperliquid
     /// @param _tokenId Spot token id
     function tokenPx(uint32 _tokenId) public view override returns (uint64) {
-        (bool success, bytes memory result) = SPOT_PX_PRECOMPILE_ADDRESS.staticcall(abi.encode(_tokenId));
+        (bool success, bytes memory result) = L1Read.SPOT_PX_PRECOMPILE_ADDRESS.staticcall(abi.encode(_tokenId));
         if (!success) revert SpotPxCallFailed();
         return abi.decode(result, (uint64));
     }

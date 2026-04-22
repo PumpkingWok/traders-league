@@ -391,8 +391,22 @@ abstract contract Duel is Ownable2Step {
         buyInToken.safeTransfer(_recipient, _amount);
     }
 
-    function _toggleTradingToken(uint32 _tokenId, uint8 _decimals) internal virtual {
+    /// @notice Enable a token to be traded in matches
+    /// it's an internal function, another one has that call it has to be defined
+    /// @param _tokenId Token id to enable
+    /// @param _decimals Token decimals
+    function _enableTradingToken(uint32 _tokenId, uint8 _decimals) internal {
+        if (tradingTokensDecimals[_tokenId] != 0) revert TokenAlreadyEnabled();
+        //uint8 tokenDecimals = _getTokenPxDecimals(_tokenId);
+        //_getSpotTokenId()
         tradingTokensDecimals[_tokenId] = _decimals;
+    }
+
+    /// @notice Disable a trading token (not in ongoing matches)
+    /// @param _tokenId Token id to disable
+    function disableTradingToken(uint32 _tokenId) external onlyOwner {
+        if (tradingTokensDecimals[_tokenId] == 0) revert TokenNotEnabled();
+        tradingTokensDecimals[_tokenId] = 0;
     }
 
     /// @notice Set platform fees
