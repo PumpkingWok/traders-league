@@ -210,7 +210,7 @@ abstract contract HyperDuelTest is Test {
 
         assertEq(playerABalanceBefore, buyInToken.balanceOf(playerA));
         assertLt(playerBBalanceBefore, buyInToken.balanceOf(playerB));
-        
+
         _checkMatchInfo(
             1, playerA, playerB, playerB, buyIn, duration, startTs + duration, IHyperDuel.MatchStatus.FINISHED
         );
