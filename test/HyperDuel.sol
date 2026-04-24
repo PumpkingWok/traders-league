@@ -19,7 +19,7 @@ abstract contract HyperDuelTest is Test {
     address internal feeRecipient = address(0xBEEF);
     address internal playerA = address(0xABCD);
     address internal playerB = address(0xABBB);
-    uint256 platformFeePercentage;
+    uint256 platformFeePercentage = 100; // 1%
 
     string forkName;
     // token index used to get the token name and token spot index
@@ -210,10 +210,15 @@ abstract contract HyperDuelTest is Test {
 
         assertEq(playerABalanceBefore, buyInToken.balanceOf(playerA));
         assertLt(playerBBalanceBefore, buyInToken.balanceOf(playerB));
-
+        
         _checkMatchInfo(
             1, playerA, playerB, playerB, buyIn, duration, startTs + duration, IHyperDuel.MatchStatus.FINISHED
         );
+
+        // Check fee
+        assertGt(buyInToken.balanceOf(address(duel)), 0);
+        duel.withdrawPlatformFee(address(this));
+        assertEq(buyInToken.balanceOf(address(duel)), 0);
     }
 
     function _getDefaultMatchData()
