@@ -2,7 +2,7 @@
 pragma solidity ^0.8.25;
 
 /// @title L1Read
-library L1Read {
+abstract contract L1Read {
     address constant SPOT_PX_PRECOMPILE_ADDRESS = 0x0000000000000000000000000000000000000808;
     address constant TOKEN_INFO_PRECOMPILE_ADDRESS = 0x000000000000000000000000000000000000080C;
 

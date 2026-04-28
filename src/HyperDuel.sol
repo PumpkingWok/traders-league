@@ -8,7 +8,7 @@ import {L1Read} from "./L1Read.sol";
 /// @author Traders League Team
 /// @notice Hyperliquid-specific Duel implementation backed by HyperEVM precompiles.
 /// @dev Resolves token metadata and spot prices from L1 read precompiles.
-contract HyperDuel is Duel {
+contract HyperDuel is Duel, L1Read {
     /// @notice Spot token id => human-readable token name.
     mapping(uint32 => string) public tokensName;
 
@@ -22,7 +22,7 @@ contract HyperDuel is Duel {
     /// @dev Uses token info precompile to map token id to spot id and conversion decimals.
     /// @param _tokenId Hyperliquid token id.
     function enableTradingToken(uint32 _tokenId) external onlyOwner {
-        L1Read.TokenInfo memory tokenInfo = L1Read.tokenInfo(_tokenId);
+        TokenInfo memory tokenInfo = tokenInfo(_tokenId);
         if (tokenInfo.spots.length == 0) revert TokenInfoCallFailed();
 
         // spot conversion decimals derive from the Hyperliquid token precision.
@@ -40,6 +40,6 @@ contract HyperDuel is Duel {
     /// @notice Get the current spot price for a Hyperliquid spot token.
     /// @param _tokenId Spot token id.
     function tokenPx(uint32 _tokenId) public view override returns (uint64) {
-        return L1Read.spotPx(_tokenId);
+        return spotPx(_tokenId);
     }
 }
