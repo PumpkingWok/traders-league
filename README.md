@@ -68,7 +68,12 @@ So the final outcome may include a discrepancy between:
 Core game engine: match lifecycle, virtual balances, swaps, settlement, and fee accounting.
 
 - `src/HyperDuel.sol`  
-Hyperliquid-specific extension. Reads:
+Hyperliquid-specific extension
+
+## Deployed Contracts
+
+- HyperDuel (Mainnet): [`0x6D3a18fD3ED6d055648D022CdeC46F559B2C8c82`](https://hyperevmscan.io/address/0x6d3a18fd3ed6d055648d022cdec46f559b2c8c82#code)
+- HyperDuel (Testnet): [`0x16DFdB24491A6Fae4F3145707A63b31FBDB5931F`](https://explore-testnet.hyperpc.app/address/0x16DFdB24491A6Fae4F3145707A63b31FBDB5931F?tab=contract)
 
 ## Match Lifecycle
 
