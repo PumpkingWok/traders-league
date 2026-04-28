@@ -69,8 +69,6 @@ Core game engine: match lifecycle, virtual balances, swaps, settlement, and fee 
 
 - `src/HyperDuel.sol`  
 Hyperliquid-specific extension. Reads:
-- token metadata from precompile `0x...080C`
-- spot prices from precompile `0x...0808`
 
 ## Match Lifecycle
 
