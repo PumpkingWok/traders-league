@@ -17,7 +17,7 @@ library L1Read {
         int8 evmExtraWeiDecimals;
     }
 
-    function spotPx(uint32 index) external view returns (uint64) {
+    function spotPx(uint32 index) internal view returns (uint64) {
         bool success;
         bytes memory result;
         (success, result) = SPOT_PX_PRECOMPILE_ADDRESS.staticcall(abi.encode(index));
@@ -25,7 +25,7 @@ library L1Read {
         return abi.decode(result, (uint64));
     }
 
-    function tokenInfo(uint32 token) external view returns (TokenInfo memory) {
+    function tokenInfo(uint32 token) internal view returns (TokenInfo memory) {
         bool success;
         bytes memory result;
         (success, result) = TOKEN_INFO_PRECOMPILE_ADDRESS.staticcall(abi.encode(token));
