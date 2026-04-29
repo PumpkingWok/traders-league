@@ -3,19 +3,19 @@ pragma solidity ^0.8.25;
 
 import {Test} from "forge-std/Test.sol";
 
-import {IERC20} from "openzeppelin/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "openzeppelin/token/ERC20/extensions/IERC20Metadata.sol";
 
 import {MockPrecompileLive} from "./mocks/MockPrecompileLive.sol";
 import {MockSpotPx} from "./mocks/MockSpotPx.sol";
 
-import {HyperDuel} from "src/HyperDuel.sol";
+import "src/HyperDuel.sol";
 import {IHyperDuel} from "./IHyperDuel.sol";
 
 abstract contract HyperDuelTest is Test {
     MockSpotPx internal spotPxPrecompile;
     HyperDuel internal duel;
 
-    IERC20 internal buyInToken;
+    IERC20Metadata internal buyInToken;
     address internal feeRecipient = address(0xBEEF);
     address internal playerA = address(0xABCD);
     address internal playerB = address(0xABBB);
@@ -38,7 +38,7 @@ abstract contract HyperDuelTest is Test {
         string[3] memory tokensName_
     ) {
         forkName = forkName_;
-        buyInToken = IERC20(buyInToken_);
+        buyInToken = IERC20Metadata(buyInToken_);
         tokensIndex = tokensIndex_;
         tokensSpotIndex = tokensSpotIndex_;
         tokensDecimals = tokensDecimals_;
@@ -67,10 +67,66 @@ abstract contract HyperDuelTest is Test {
         buyInToken.approve(address(duel), 100e6);
     }
 
-    function test_deploy() public view {
+    function test_Deploy() public view {
         assertEq(address(duel.buyInToken()), address(buyInToken));
         assertEq(duel.platformFeePercentage(), platformFeePercentage);
         assertEq(duel.owner(), address(this));
+        assertEq(duel.minBuyIn(), 10 * 10 ** buyInToken.decimals());
+        assertEq(duel.maxBuyIn(), 1000 * 10 ** buyInToken.decimals());
+        assertEq(duel.minDuration(), 15 minutes);
+        assertEq(duel.maxDuration(), 1 weeks);
+        assertEq(duel.INITIAL_VIRTUAL_USD(), 100_000e18);
+        assertEq(duel.BASE_FEE(), 10_000);
+        assertEq(duel.GAME_TRADER_FEE(), 30);
+        assertEq(duel.MAX_PLATFORM_FEE(), 500);
+    }
+
+    function test_SetBuyIn() public {
+        // try to set min buy in equal to zero
+        vm.expectRevert(Duel.WrongBuyIn.selector);
+        duel.setMinBuyIn(0);
+
+        // try to set max buy in equal to zero
+        vm.expectRevert(Duel.WrongBuyIn.selector);
+        duel.setMaxBuyIn(0);
+
+        uint256 decimals = buyInToken.decimals();
+
+        // try to set a min buy in higher than max buy in
+        vm.expectRevert(Duel.WrongBuyIn.selector);
+        duel.setMinBuyIn(2000 * 10 ** decimals);
+
+        // try to set a max buy in lower than min buy in
+        vm.expectRevert(Duel.WrongBuyIn.selector);
+        duel.setMaxBuyIn(5 * 10 ** decimals);
+    }
+
+    function test_SetDuration() public {
+        // try to set min duration equal to zero
+        vm.expectRevert(Duel.WrongDuration.selector);
+        duel.setMinDuration(0);
+
+        // try to set max duration equal to zero
+        vm.expectRevert(Duel.WrongDuration.selector);
+        duel.setMaxDuration(0);
+
+        // try to set a min duration higher than max duration
+        vm.expectRevert(Duel.WrongDuration.selector);
+        duel.setMinDuration(2 weeks);
+
+        // try to set a max duration lower than min duration
+        vm.expectRevert(Duel.WrongDuration.selector);
+        duel.setMaxDuration(1 minutes);
+    }
+
+    function test_setPlatformFee() public {
+        uint256 maxPlatformFeePercentage = duel.MAX_PLATFORM_FEE();
+        // try to set more than max platform fee
+        vm.expectRevert(Duel.FeeTooHigh.selector);
+        duel.setPlatformFeePercentage(maxPlatformFeePercentage + 1);
+
+        duel.setPlatformFeePercentage(maxPlatformFeePercentage);
+        assertEq(duel.platformFeePercentage(), maxPlatformFeePercentage);
     }
 
     function test_TradingTokens() public {
@@ -80,7 +136,7 @@ abstract contract HyperDuelTest is Test {
         }
     }
 
-    function test_createMatchWithoutJoin() external {
+    function test_CreateMatchWithoutJoin() external {
         (uint256 buyIn, uint256 duration, uint32[] memory tokensAllowed) = _getDefaultMatchData();
 
         duel.createMatch(address(0), address(0), tokensAllowed, buyIn, duration);
@@ -95,7 +151,7 @@ abstract contract HyperDuelTest is Test {
         _checkMatchInfo(1, address(0), address(0), address(0), buyIn, duration, 0, IHyperDuel.MatchStatus.TO_START);
     }
 
-    function test_createMatchAndJoin() external {
+    function test_CreateMatchAndJoin() external {
         (uint256 buyIn, uint256 duration, uint32[] memory tokensAllowed) = _getDefaultMatchData();
 
         uint256 balanceBefore = buyInToken.balanceOf(playerA);
@@ -109,7 +165,7 @@ abstract contract HyperDuelTest is Test {
         _checkMatchInfo(1, playerA, address(0), address(0), buyIn, duration, 0, IHyperDuel.MatchStatus.TO_START);
     }
 
-    function test_createMatchReserved() external {
+    function test_CreateMatchReserved() external {
         (uint256 buyIn, uint256 duration, uint32[] memory tokensAllowed) = _getDefaultMatchData();
 
         vm.prank(playerA);
@@ -118,7 +174,7 @@ abstract contract HyperDuelTest is Test {
         _checkMatchInfo(1, playerA, playerB, address(0), buyIn, duration, 0, IHyperDuel.MatchStatus.TO_START);
     }
 
-    function test_unjoinMatch() external {
+    function test_UnjoinMatch() external {
         (uint256 buyIn, uint256 duration, uint32[] memory tokensAllowed) = _getDefaultMatchData();
 
         uint256 initBalance = buyInToken.balanceOf(playerA);
@@ -135,7 +191,7 @@ abstract contract HyperDuelTest is Test {
         _checkMatchInfo(1, address(0), address(0), address(0), buyIn, duration, 0, IHyperDuel.MatchStatus.TO_START);
     }
 
-    function test_startMatch() external {
+    function test_StartMatch() external {
         (uint256 buyIn, uint256 duration, uint32[] memory tokensAllowed) = _getDefaultMatchData();
 
         vm.startPrank(playerA);
@@ -151,7 +207,7 @@ abstract contract HyperDuelTest is Test {
         );
     }
 
-    function test_concludeMatchInTie() external {
+    function test_ConcludeMatchInTie() external {
         (uint256 buyIn, uint256 duration, uint32[] memory tokensAllowed) = _getDefaultMatchData();
 
         vm.startPrank(playerA);
@@ -172,7 +228,7 @@ abstract contract HyperDuelTest is Test {
         );
     }
 
-    function test_concludeMatchWithWinner() external {
+    function test_ConcludeMatchWithWinner() external {
         (uint256 buyIn, uint256 duration, uint32[] memory tokensAllowed) = _getDefaultMatchData();
 
         vm.prank(playerA);
@@ -219,6 +275,31 @@ abstract contract HyperDuelTest is Test {
         assertGt(buyInToken.balanceOf(address(duel)), 0);
         duel.withdrawPlatformFee(address(this));
         assertEq(buyInToken.balanceOf(address(duel)), 0);
+    }
+
+    function test_DisableTokenNotAffectOngoingMatch() public {
+        (uint256 buyIn, uint256 duration, uint32[] memory tokensAllowed) = _getDefaultMatchData();
+
+        vm.prank(playerA);
+        // create match
+        duel.createMatch(playerA, address(0), tokensAllowed, buyIn, duration);
+
+        vm.prank(playerB);
+        // playerB joins to start the match
+        duel.joinMatch(1);
+
+        // disable a token
+        duel.disableTradingToken(tokensSpotIndex[0]);
+
+        // simulate buy, swap usd to tokens disabled in next matches
+        uint32[] memory tokensIn = new uint32[](1);
+        tokensIn[0] = 0;
+        uint32[] memory tokensOut = new uint32[](1);
+        tokensOut[0] = tokensSpotIndex[0]; // BTC
+        uint256[] memory amountsIn = new uint256[](1);
+        amountsIn[0] = 50_000e18;
+        vm.prank(playerA);
+        duel.swap(1, tokensIn, tokensOut, amountsIn);
     }
 
     function _getDefaultMatchData()
