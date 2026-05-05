@@ -42,6 +42,8 @@ abstract contract Challenge is Ownable2Step {
     uint256 public constant BASE_FEE = 10_000;
     /// @notice Maximum platform fee (500 bps = 5%).
     uint256 public constant MAX_PLATFORM_FEE = 500; // 5%
+    /// @notice Maximum expiry time for a challenge to be joined.
+    uint256 public constant MAX_EXPIRY_DURATION = 8 weeks;
 
     /// @notice token used for challenge buy-ins and payouts.
     IERC20Metadata public immutable buyInToken;
@@ -101,7 +103,12 @@ abstract contract Challenge is Ownable2Step {
     error ZeroToken();
 
     event ChallengeCreated(
-        uint256 buyIn, uint256 prize, uint256 duration, uint256 expiry, uint256 targetAmount, uint256 challengeId
+        uint256 buyIn,
+        uint256 prize,
+        uint256 duration,
+        uint256 expiryDuration,
+        uint256 targetAmount,
+        uint256 challengeId
     );
 
     event ChallengeConcluded(address indexed winner, uint256 challengeId);
@@ -132,37 +139,44 @@ abstract contract Challenge is Ownable2Step {
         maxBuyIn = 1000 * (10 ** buyInToken.decimals()); // 1000
     }
 
+    /// @notice Create a new challenge
+    /// @param _tokensAllowed Tokens allowed to be traded during the match.
+    /// @param _buyIn Buy-in amount required from each player.
+    /// @param _prize Challenge prize
+    /// @param _duration Challenge duration in seconds.
+    /// @param _expiryDuration Expiry duration until the challenge is valid to be joined
+    /// @param _targetAmount Usd amount to reach for winning the challenge
     function createChallenge(
         uint32[] memory _tokensAllowed,
         uint256 _buyIn,
         uint256 _prize,
         uint256 _duration,
-        uint256 _expiry,
+        uint256 _expiryDuration,
         uint256 _targetAmount
     ) external {
-        _createChallenge(_tokensAllowed, _buyIn, _prize, _duration, _expiry, _targetAmount);
+        _createChallenge(_tokensAllowed, _buyIn, _prize, _duration, _expiryDuration, _targetAmount);
     }
 
     /// @notice Internal challenge creation with validated input shape.
     /// @param _tokensAllowed Tokens allowed to be traded during the challenge.
     /// @param _buyIn Buy-in amount.
-    /// @param _prize Prize to reserve to the winner in case
+    /// @param _prize Challenge prize
     /// @param _duration Challenge duration in seconds.
-    /// @param _expiry Expiry time until the challenge is valid to be joined
+    /// @param _expiryDuration Expiry duration until the challenge is valid to be joined
     /// @param _targetAmount Usd amount to reach for winning the challenge
     function _createChallenge(
         uint32[] memory _tokensAllowed,
         uint256 _buyIn,
         uint256 _prize,
         uint256 _duration,
-        uint256 _expiry,
+        uint256 _expiryDuration,
         uint256 _targetAmount
     ) internal {
         if (_tokensAllowed.length == 0) revert ZeroToken();
         if (_buyIn == 0 || _buyIn > maxBuyIn || _buyIn < minBuyIn) revert WrongBuyIn();
         if (_prize == 0 || _prize < _buyIn) revert WrongPrize();
         if (_duration == 0 || _duration > maxDuration || _duration < minDuration) revert WrongDuration();
-        if (_expiry <= block.timestamp) revert WrongExpiry();
+        if (_expiryDuration == 0 || _expiryDuration > MAX_EXPIRY_DURATION) revert WrongExpiry();
         if (_targetAmount <= INITIAL_VIRTUAL_USD) revert WrongTargetAmount();
 
         // ensure each requested token is already enabled and not duplicated.
@@ -190,14 +204,14 @@ abstract contract Challenge is Ownable2Step {
             prize: _prize,
             duration: _duration,
             endTime: 0,
-            expiry: _expiry,
+            expiry: block.timestamp + _expiryDuration,
             targetAmount: _targetAmount,
             status: ChallengeStatus.TO_START
         });
         // store allowed tokens.
         challengeTokensAllowed[nextChallengeId] = _tokensAllowed;
 
-        emit ChallengeCreated(_buyIn, _prize, _duration, _expiry, _targetAmount, nextChallengeId);
+        emit ChallengeCreated(_buyIn, _prize, _duration, _expiryDuration, _targetAmount, nextChallengeId);
     }
 
     /// @notice Join an existing challenge.
