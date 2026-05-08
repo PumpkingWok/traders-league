@@ -363,7 +363,7 @@ abstract contract Challenge is Ownable2Step {
     function concludeChallenge(uint256 _challengeId) external onlyExistingChallenge(_challengeId) {
         ChallengeInfo storage challengeInfo = challenges[_challengeId];
         if (challengeInfo.status != ChallengeStatus.ONGOING) revert NotOngoingChallenge();
-        // challenge must be expired.
+        // challenge must be concluded
         if (block.timestamp <= challengeInfo.endTime) revert OngoingChallenge();
 
         uint256 prize = challengeInfo.prize;
@@ -408,7 +408,6 @@ abstract contract Challenge is Ownable2Step {
     /// @param _challengeId Challenge id.
     function _getPlayerTotalUsd(uint256 _challengeId) internal view returns (uint256 totalUsd) {
         ChallengeInfo memory challengeInfo = challenges[_challengeId];
-        //address player = challengeInfo.player;
         if (challengeInfo.status != ChallengeStatus.ONGOING) revert NotOngoingChallenge();
         uint32[] memory tokensAllowed = challengeTokensAllowed[_challengeId];
         uint256 length = tokensAllowed.length;
