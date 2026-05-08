@@ -5,13 +5,13 @@ import {Test} from "forge-std/Test.sol";
 
 import {IERC20Metadata} from "openzeppelin/token/ERC20/extensions/IERC20Metadata.sol";
 
-import {MockPrecompileLive} from "./mocks/MockPrecompileLive.sol";
-import {MockSpotPx} from "./mocks/MockSpotPx.sol";
+import {MockPrecompileLive} from "../mocks/MockPrecompileLive.sol";
+import {MockSpotPx} from "../mocks/MockSpotPx.sol";
 
 import "src/HyperDuel.sol";
 import {IHyperDuel} from "./IHyperDuel.sol";
 
-abstract contract HyperDuelTest is Test {
+abstract contract HyperDuelInt is Test {
     MockSpotPx internal spotPxPrecompile;
     HyperDuel internal duel;
 
@@ -343,10 +343,6 @@ abstract contract HyperDuelTest is Test {
             vm.etch(precompileAddress, type(MockPrecompileLive).runtimeCode);
             vm.allowCheatcodes(precompileAddress);
         }
-
-        // Owerwrite precompiles required to change
-        // vm.etch(0x0000000000000000000000000000000000000808, type(MockSpotPx).runtimeCode);
-        // spotPxPrecompile = MockSpotPx(0x0000000000000000000000000000000000000808);
     }
 }
 
@@ -357,8 +353,8 @@ address constant BUY_IN_TOKEN_TESTNET = 0x2B3370eE501B4a559b57D449569354196457D8
 // UBTC -> tokenIndex 197, spot index 142, decimals 3
 // UETH -> tokenIndex 221, spot index 151, decimals 4
 // USOL -> tokenIndex 254, spot index 156, decimals 5
-contract HyperDuelTestMainnet is
-    HyperDuelTest(
+contract HyperDuelIntMainnet is
+    HyperDuelInt(
         "hl_mainnet",
         BUY_IN_TOKEN_MAINNET,
         [uint32(197), uint32(221), uint32(254)],
@@ -371,8 +367,8 @@ contract HyperDuelTestMainnet is
 // HYPE -> tokenIndex 1105, spot index 1035, decimals 6
 // UETH -> tokenIndex 1242, spot index 1137, decimals 4
 // HORSE -> tokenIndex 1435, spot index 1319, decimals 6
-contract HyperDuelTestTestnet is
-    HyperDuelTest(
+contract HyperDuelIntTestnet is
+    HyperDuelInt(
         "hl_testnet",
         BUY_IN_TOKEN_TESTNET,
         [uint32(1105), uint32(1242), uint32(1435)],
