@@ -2,10 +2,10 @@
 pragma solidity ^0.8.25;
 
 import {Test} from "forge-std/Test.sol";
-import "./mocks/MockChallenge.sol";
-import {MockUSDC} from "./mocks/MockUSDC.sol";
+import "../mocks/MockChallenge.sol";
+import {MockUSDC} from "../mocks/MockUSDC.sol";
 
-contract ChallengeUnitTest is Test {
+contract ChallengeUnit is Test {
     MockUSDC internal usdc = new MockUSDC();
     MockChallenge internal challenge;
 
@@ -18,14 +18,14 @@ contract ChallengeUnitTest is Test {
     uint256 internal constant TARGET = 110_000e18;
     uint256 internal constant DURATION = 1 days;
     uint256 internal constant EXPIRY_DURATION = 3 days;
-    uint256 internal constant JOIN_FEE = 50; // 0.5%
+    uint256 internal constant PLATFORM_FEE = 50; // 0.5%
 
     uint32 internal constant TOKEN_1 = 1;
     uint32 internal constant TOKEN_2 = 2;
     uint32 internal constant TOKEN_3 = 3; // not enabled
 
     function setUp() public {
-        challenge = new MockChallenge(address(usdc), JOIN_FEE);
+        challenge = new MockChallenge(address(usdc), PLATFORM_FEE);
 
         challenge.setToken(TOKEN_1, 3, 100_000e3);
         challenge.setToken(TOKEN_2, 4, 1_000e4);
@@ -537,8 +537,20 @@ contract ChallengeUnitTest is Test {
         challenge.disableTradingToken(TOKEN_1);
     }
 
+    function test_DisableTradingTokenOnlyAffectsFutureUse() external {
+        _createDefaultChallenge();
+
+        assertGt(challenge.tradingTokensDecimals(TOKEN_1), 0);
+        assertGt(challenge.challengeTokensDecimals(1, TOKEN_1), 0);
+
+        challenge.disableTradingToken(TOKEN_1);
+
+        assertEq(challenge.tradingTokensDecimals(TOKEN_1), 0);
+        assertGt(challenge.challengeTokensDecimals(1, TOKEN_1), 0);
+    }
+
     function test_SetPlatformFeePercentage() external {
-        assertEq(challenge.platformFeePercentage(), JOIN_FEE);
+        assertEq(challenge.platformFeePercentage(), PLATFORM_FEE);
 
         challenge.setPlatformFeePercentage(100);
 
