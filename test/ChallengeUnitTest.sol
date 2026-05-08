@@ -3,7 +3,7 @@ pragma solidity ^0.8.25;
 
 import {Test} from "forge-std/Test.sol";
 import "./mocks/MockChallenge.sol";
-import {MockUSDC} from "./mocks/MockUsdc.sol";
+import {MockUSDC} from "./mocks/MockUSDC.sol";
 
 contract ChallengeUnitTest is Test {
     MockUSDC internal usdc = new MockUSDC();
